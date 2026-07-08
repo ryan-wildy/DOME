@@ -1,0 +1,6 @@
+node_modules/
+.env
+.DS_Store
+data/dome-db.json
+data/dome-db.*.bak
+npm-debug.log*

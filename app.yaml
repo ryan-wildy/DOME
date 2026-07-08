@@ -1,0 +1,10 @@
+runtime: nodejs22
+
+env_variables:
+  NODE_ENV: "production"
+  PORT: "8080"
+  DATA_FILE: "data/dome-db.json"
+
+handlers:
+  - url: /.*
+    script: auto
