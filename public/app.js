@@ -3,7 +3,7 @@ const state = {
   route: location.hash.slice(1) || "/",
   user: JSON.parse(localStorage.getItem("domeUser") || "null"),
   token: localStorage.getItem("domeToken") || "",
-  adminKey: localStorage.getItem("domeAdminKey") || "DOMEADMIN",
+  adminKey: localStorage.getItem("domeAdminKey") || (["localhost", "127.0.0.1"].includes(location.hostname) ? "DOMEADMIN" : ""),
   menuOpen: false,
   filters: { search: "", type: "All", category: "All" },
   admin: null,
@@ -637,7 +637,7 @@ function adminPage() {
       <header class="page-head">
         <p class="eyebrow">Admin portal</p>
         <h1>Launch operations queue.</h1>
-        <p>Default local admin key is <strong>DOMEADMIN</strong>. Set ADMIN_KEY before public deployment.</p>
+        <p>Enter the deployment admin key to review applications, setup requests, enquiries and audit activity. Local development uses <strong>DOMEADMIN</strong>.</p>
       </header>
       <div class="container">
         <div class="card">
@@ -865,7 +865,7 @@ async function refreshAdminOnRoute() {
 }
 
 async function init() {
-  state.boot = await api("/api/bootstrap");
+  state.boot = await loadBootstrapWithRetry();
   if (state.user?.role === "Admin") {
     try {
       state.admin = await api("/api/admin", { headers: { "x-admin-key": state.adminKey } });
@@ -874,6 +874,20 @@ async function init() {
     }
   }
   render();
+}
+
+async function loadBootstrapWithRetry() {
+  let lastError;
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    try {
+      return await api("/api/bootstrap");
+    } catch (error) {
+      lastError = error;
+      app.innerHTML = `<div class="loading">Waking the Dome demo... retry ${attempt}/4</div>`;
+      await new Promise((resolve) => setTimeout(resolve, attempt * 900));
+    }
+  }
+  throw lastError;
 }
 
 window.addEventListener("hashchange", () => {
@@ -889,5 +903,13 @@ app.addEventListener("submit", onSubmit);
 app.addEventListener("input", handleInput);
 
 init().catch((error) => {
-  app.innerHTML = `<div class="loading">Could not load Dome: ${escapeHtml(error.message)}</div>`;
+  app.innerHTML = `
+    <div class="loading">
+      <div>
+        <strong>Could not load Dome yet.</strong>
+        <p>${escapeHtml(error.message)}</p>
+        <button class="button" onclick="location.reload()">Try again</button>
+      </div>
+    </div>
+  `;
 });

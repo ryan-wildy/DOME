@@ -2,14 +2,16 @@ const http = require("node:http");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const zlib = require("node:zlib");
 const { URL } = require("node:url");
 
 const PORT = Number(process.env.PORT || 8080);
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const DATA_FILE = path.resolve(ROOT, process.env.DATA_FILE || "data/dome-db.json");
-const ADMIN_KEY = process.env.ADMIN_KEY || "DOMEADMIN";
-const SESSION_SECRET = process.env.SESSION_SECRET || "change-this-before-production";
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const ADMIN_KEY = process.env.ADMIN_KEY || (IS_PRODUCTION ? "" : "DOMEADMIN");
+const SESSION_SECRET = process.env.SESSION_SECRET || (IS_PRODUCTION ? crypto.randomBytes(32).toString("hex") : "change-this-before-production");
 const OTP_TTL_MS = 10 * 60 * 1000;
 
 const mimeTypes = {
@@ -261,6 +263,7 @@ const users = [
 ];
 
 let dbCache;
+let dbInitPromise;
 
 async function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   const key = await new Promise((resolve, reject) => {
@@ -343,15 +346,19 @@ async function seedDb() {
 
 async function ensureDb() {
   if (dbCache) return dbCache;
-  try {
-    const raw = await fs.readFile(DATA_FILE, "utf8");
-    dbCache = JSON.parse(raw);
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-    dbCache = await seedDb();
-    await saveDb();
-  }
-  return dbCache;
+  if (dbInitPromise) return dbInitPromise;
+  dbInitPromise = (async () => {
+    try {
+      const raw = await fs.readFile(DATA_FILE, "utf8");
+      dbCache = JSON.parse(raw);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      dbCache = await seedDb();
+      await saveDb();
+    }
+    return dbCache;
+  })();
+  return dbInitPromise;
 }
 
 async function saveDb() {
@@ -383,6 +390,42 @@ function json(res, status, payload) {
     "cache-control": "no-store"
   });
   res.end(body);
+}
+
+function send(req, res, status, headers, body) {
+  const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
+  const acceptEncoding = req.headers["accept-encoding"] || "";
+  const contentType = headers["content-type"] || "";
+  const shouldZip = buffer.length > 1024 && /\b(gzip)\b/.test(acceptEncoding) && /^(text\/|application\/json|application\/javascript|image\/svg)/.test(contentType);
+
+  if (!shouldZip) {
+    res.writeHead(status, { ...headers, "content-length": buffer.length });
+    if (req.method === "HEAD") return res.end();
+    return res.end(buffer);
+  }
+
+  zlib.gzip(buffer, { level: 6 }, (error, zipped) => {
+    if (error) {
+      res.writeHead(status, { ...headers, "content-length": buffer.length });
+      if (req.method === "HEAD") return res.end();
+      return res.end(buffer);
+    }
+    res.writeHead(status, {
+      ...headers,
+      "content-encoding": "gzip",
+      "content-length": zipped.length,
+      vary: "Accept-Encoding"
+    });
+    if (req.method === "HEAD") return res.end();
+    res.end(zipped);
+  });
+}
+
+function jsonWithReq(req, res, status, payload) {
+  send(req, res, status, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store"
+  }, JSON.stringify(payload));
 }
 
 function readBody(req) {
@@ -432,6 +475,7 @@ function validatePassword(value) {
 }
 
 function isAdmin(req) {
+  if (!ADMIN_KEY) return false;
   return req.headers["x-admin-key"] === ADMIN_KEY;
 }
 
@@ -792,6 +836,13 @@ async function api(req, res, pathname) {
   return json(res, 404, { error: "API endpoint not found." });
 }
 
+function cacheControlFor(ext, pathname) {
+  if (ext === ".html") return "public, max-age=60, stale-while-revalidate=600";
+  if (pathname.startsWith("/assets/")) return "public, max-age=31536000, immutable";
+  if ([".js", ".css"].includes(ext)) return "public, max-age=300, must-revalidate";
+  return "public, max-age=3600";
+}
+
 async function staticFile(req, res, pathname) {
   const safePath = pathname === "/" ? "/index.html" : pathname;
   const filePath = path.normalize(path.join(PUBLIC_DIR, safePath));
@@ -806,16 +857,14 @@ async function staticFile(req, res, pathname) {
     if (stat.isDirectory()) throw Object.assign(new Error("Directory"), { code: "EISDIR" });
     const ext = path.extname(filePath);
     const body = await fs.readFile(filePath);
-    res.writeHead(200, {
+    send(req, res, 200, {
       "content-type": mimeTypes[ext] || "application/octet-stream",
-      "cache-control": [".html", ".js", ".css"].includes(ext) ? "no-store" : "public, max-age=3600"
-    });
-    res.end(body);
+      "cache-control": cacheControlFor(ext, safePath)
+    }, body);
   } catch (error) {
     if (error.code === "ENOENT" || error.code === "EISDIR") {
       const body = await fs.readFile(path.join(PUBLIC_DIR, "index.html"));
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-      res.end(body);
+      send(req, res, 200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }, body);
     } else {
       res.writeHead(500);
       res.end("Server error");
@@ -826,6 +875,22 @@ async function staticFile(req, res, pathname) {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
+    if (url.pathname === "/healthz") {
+      return jsonWithReq(req, res, 200, {
+        ok: true,
+        service: "dome-platform",
+        time: new Date().toISOString()
+      });
+    }
+    if (url.pathname === "/readyz") {
+      await ensureDb();
+      return jsonWithReq(req, res, 200, {
+        ok: true,
+        service: "dome-platform",
+        dataReady: true,
+        time: new Date().toISOString()
+      });
+    }
     if (url.pathname.startsWith("/api/")) {
       await api(req, res, url.pathname);
     } else {
@@ -837,13 +902,13 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-ensureDb()
-  .then(() => {
-    server.listen(PORT, () => {
-      console.log(`Dome Platform running on http://localhost:${PORT}`);
-    });
-  })
-  .catch((error) => {
-    console.error("Failed to initialize Dome Platform", error);
-    process.exit(1);
-  });
+server.listen(PORT, () => {
+  console.log(`Dome Platform running on http://localhost:${PORT}`);
+});
+
+ensureDb().catch((error) => {
+  console.error("Failed to initialize Dome Platform data", error);
+  if (process.env.NODE_ENV === "production") {
+    process.exitCode = 1;
+  }
+});
