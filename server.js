@@ -259,10 +259,10 @@ const webinars = [
 ];
 
 const users = [
-  { role: "Reseller", email: "vendor@dome.com", password: "vendor123", businessName: "Shyam Enterprises", businessId: "shyam", status: "approved" },
-  { role: "OEM", email: "oem@dome.com", password: "oem123", businessName: "PrintoDome", businessId: "printodome", status: "approved" },
-  { role: "Buyer", email: "buyer@dome.com", password: "buyer123", businessName: "City Buyer Office", status: "approved" },
-  { role: "Admin", email: "admin@dome.com", password: "admin123", businessName: "Dome Admin", status: "approved" }
+  { role: "Reseller", email: "vendor@dome.com", phone: "+919000000001", password: "vendor123", businessName: "Shyam Enterprises", businessId: "shyam", status: "approved" },
+  { role: "OEM", email: "oem@dome.com", phone: "+919000000002", password: "oem123", businessName: "PrintoDome", businessId: "printodome", status: "approved" },
+  { role: "Buyer", email: "buyer@dome.com", phone: "+919000000003", password: "buyer123", businessName: "City Buyer Office", status: "approved" },
+  { role: "Admin", email: "admin@dome.com", phone: "+919000000004", password: "admin123", businessName: "Dome Admin", status: "approved" }
 ];
 
 let dbCache;
@@ -289,7 +289,7 @@ async function seedDb() {
       id: crypto.randomUUID(),
       role: user.role,
       email: user.email.toLowerCase(),
-      phone: user.role === "Admin" ? "+910000000000" : "",
+      phone: user.phone,
       businessName: user.businessName,
       businessId: user.businessId || "",
       status: user.status,
@@ -394,6 +394,13 @@ function migrateDb(db) {
   db.otps ||= [];
   for (const user of db.users) {
     if (user.role === "Vendor") user.role = "Reseller";
+    const demoPhoneByEmail = {
+      "vendor@dome.com": "+919000000001",
+      "oem@dome.com": "+919000000002",
+      "buyer@dome.com": "+919000000003",
+      "admin@dome.com": "+919000000004"
+    };
+    if (!user.phone && demoPhoneByEmail[user.email]) user.phone = demoPhoneByEmail[user.email];
     user.emailVerified = Boolean(user.emailVerified || user.status === "approved");
     user.phoneVerified = Boolean(user.phoneVerified || user.status === "approved");
   }
@@ -659,6 +666,23 @@ function profileForUser(db, user) {
   return db.businessProfiles.find((profile) => profile.userId === user.id || profile.userEmail === user.email);
 }
 
+function revealedContactsForUser(db, user) {
+  return db.revealPurchases
+    .filter((item) => item.userId === user.id)
+    .map((item) => {
+      const business = db.businesses.find((entry) => entry.id === item.businessId);
+      if (!business) return null;
+      return {
+        businessId: business.id,
+        businessName: business.name,
+        phone: business.phone || "Contact phone pending",
+        email: business.email || "Contact email pending",
+        gemUrl: business.gemUrl || "https://gem.gov.in"
+      };
+    })
+    .filter(Boolean);
+}
+
 async function sendEmailOtp(email, code) {
   if (process.env.RESEND_API_KEY) {
     const response = await fetch("https://api.resend.com/emails", {
@@ -884,6 +908,20 @@ async function api(req, res, pathname) {
     return json(res, 200, { ok: true, token: signToken(user), user: cleanUser(user) });
   }
 
+  if (req.method === "POST" && pathname === "/api/session/otp") {
+    const payload = await readBody(req);
+    const { channel, target } = otpTarget(payload);
+    if (channel === "phone" && !isPhone(target)) return json(res, 422, { error: "Enter a valid mobile number." });
+    if (channel === "email" && !isEmail(target)) return json(res, 422, { error: "Enter a valid email address." });
+    if (!hasVerifiedOtp(db, target, channel, "login")) return json(res, 422, { error: "Please verify the code first." });
+    const user = db.users.find((item) => channel === "phone" ? item.phone === target : item.email === target);
+    if (!user) return json(res, 404, { error: "No Dome account found for this verified identity." });
+    if (user.status !== "approved") return json(res, 403, { error: `Your account is ${user.status}.` });
+    addAudit(db, user.email, "otp_login", channel);
+    await saveDb();
+    return json(res, 200, { ok: true, token: signToken(user), user: cleanUser(user), profile: profileForUser(db, user) || null, revealedContacts: revealedContactsForUser(db, user) });
+  }
+
   if (req.method === "POST" && pathname === "/api/contact") {
     const payload = await readBody(req);
     const missing = required(payload, ["businessId", "name", "email", "phone", "message"]);
@@ -1035,14 +1073,14 @@ async function api(req, res, pathname) {
   if (req.method === "GET" && pathname === "/api/me") {
     if (!tokenUser) return json(res, 401, { error: "Sign in required." });
     const liveUser = db.users.find((user) => user.id === tokenUser.id) || tokenUser;
-    return json(res, 200, { user: cleanUser(liveUser), profile: profileForUser(db, liveUser) || null });
+    return json(res, 200, { user: cleanUser(liveUser), profile: profileForUser(db, liveUser) || null, revealedContacts: revealedContactsForUser(db, liveUser) });
   }
 
   if (req.method === "GET" && pathname === "/api/profile") {
     if (!tokenUser) return json(res, 401, { error: "Sign in required." });
     const liveUser = db.users.find((user) => user.id === tokenUser.id);
     if (!liveUser) return json(res, 401, { error: "Session user not found." });
-    return json(res, 200, { user: cleanUser(liveUser), profile: profileForUser(db, liveUser) || null });
+    return json(res, 200, { user: cleanUser(liveUser), profile: profileForUser(db, liveUser) || null, revealedContacts: revealedContactsForUser(db, liveUser) });
   }
 
   if (req.method === "POST" && pathname === "/api/profile") {

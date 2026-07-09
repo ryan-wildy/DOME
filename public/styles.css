@@ -150,9 +150,9 @@ button {
 }
 
 .button.ghost {
-  color: var(--ink);
-  background: transparent;
-  border: 1px solid var(--line);
+  color: var(--white);
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.72);
 }
 
 .button.warn {
@@ -499,6 +499,110 @@ button {
   background: #fff1ef;
 }
 
+.notice.success {
+  border-left-color: var(--green);
+  background: #ecf8f2;
+}
+
+.profile-message {
+  margin-top: 16px;
+  max-width: 760px;
+}
+
+.profile-hero .notice {
+  color: var(--ink);
+  background: #fff7e6;
+  border-color: #f0c87c;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.18);
+}
+
+.profile-hero .notice.success {
+  background: #e8fff4;
+  border-color: #90d6b3;
+}
+
+.verify-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.verify-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px;
+  background: #fbfffd;
+}
+
+.verify-card.verified {
+  border-color: #87c9aa;
+  background: #effbf5;
+}
+
+.verify-head {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 14px;
+}
+
+.verify-head h3 {
+  margin: 0 0 4px;
+}
+
+.verify-head p {
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+
+.step-dot {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--green);
+  color: var(--white);
+  font-weight: 900;
+}
+
+.verify-fields {
+  display: grid;
+  grid-template-columns: 1fr minmax(150px, 0.42fr);
+  gap: 12px;
+}
+
+.form-actions.compact {
+  margin-top: 12px;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 4px;
+  gap: 4px;
+  background: var(--mist);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin-bottom: 18px;
+}
+
+.segmented button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-weight: 850;
+}
+
+.segmented button.active {
+  background: var(--white);
+  color: var(--green-dark);
+  box-shadow: 0 1px 0 rgba(19, 32, 27, 0.08);
+}
+
 .split {
   display: grid;
   grid-template-columns: 1.08fr 0.92fr;
@@ -724,7 +828,8 @@ tr:last-child td {
   }
 
   .filters,
-  .form-grid {
+  .form-grid,
+  .verify-fields {
     grid-template-columns: 1fr;
   }
 
