@@ -7,7 +7,9 @@ const state = {
   menuOpen: false,
   filters: { search: "", type: "All", category: "All" },
   admin: null,
-  adminTab: "applications"
+  adminTab: "applications",
+  profile: null,
+  gstLookup: null
 };
 
 const app = document.querySelector("#app");
@@ -61,7 +63,7 @@ function shell(content) {
           <div class="nav-links">
             ${navLink("/", "Home")}
             ${navLink("/about", "About GeM")}
-            ${navLink("/directory", "OEMs/Vendors")}
+            ${navLink("/directory", "OEMs/Resellers")}
             ${navLink("/learn", "Learn")}
             ${navLink("/webinars", "Webinars")}
             ${state.user ? navLink("/dashboard", "Dashboard") : ""}
@@ -75,7 +77,7 @@ function shell(content) {
         <div class="mobile-panel ${state.menuOpen ? "open" : ""}">
           ${navLink("/", "Home")}
           ${navLink("/about", "About GeM")}
-          ${navLink("/directory", "OEMs/Vendors")}
+          ${navLink("/directory", "OEMs/Resellers")}
           ${navLink("/learn", "Learn")}
           ${navLink("/webinars", "Webinars")}
           ${state.user ? navLink("/dashboard", "Dashboard") : `<a class="nav-link" href="#/login">Log in</a><a class="button" href="#/register">Join Dome</a>`}
@@ -105,7 +107,7 @@ function footer() {
         <div>
           <strong>For Business</strong>
           <a href="#/directory?type=OEM">Discover OEMs</a>
-          <a href="#/register">Become a vendor</a>
+          <a href="#/register">Become a reseller</a>
           <a href="#/register">List as an OEM</a>
         </div>
         <div>
@@ -150,13 +152,13 @@ function homePage() {
           <p>Dome helps businesses understand GeM, build authorized OEM-Vendor relationships, share sales kits, and get discovered. Dome never performs official GeM actions; it coordinates the journey around them.</p>
           <div class="hero-actions">
             <a class="button" href="#/register">Join Dome</a>
-            <a class="button secondary" href="#/directory">Explore OEMs/Vendors</a>
+            <a class="button secondary" href="#/directory">Explore OEMs/Resellers</a>
             <a class="button ghost" href="#/about">Learn the boundary</a>
           </div>
           <div class="hero-stats" aria-label="Platform signals">
             <div class="hero-stat"><strong>23 lakh+</strong><span>sellers on GeM</span></div>
             <div class="hero-stat"><strong>10,900+</strong><span>product categories</span></div>
-            <div class="hero-stat"><strong>4 roles</strong><span>OEM, Vendor, Buyer, Admin</span></div>
+            <div class="hero-stat"><strong>4 roles</strong><span>OEM, Reseller, Buyer, Admin</span></div>
             <div class="hero-stat"><strong>30 day</strong><span>premium calling cycle</span></div>
           </div>
         </div>
@@ -177,9 +179,9 @@ function homePage() {
               <a class="button secondary" href="#/learn">Learn the basics</a>
             </article>
             <article class="card">
-              <h3>Grow as a Vendor</h3>
+              <h3>Grow as a Reseller</h3>
               <p>Find OEMs, request authorization, track the relationship and show Buyers which OEMs you represent.</p>
-              <a class="button secondary" href="#/register">Join as Vendor</a>
+              <a class="button secondary" href="#/register">Join as Reseller</a>
             </article>
             <article class="card">
               <h3>Enable as an OEM</h3>
@@ -195,7 +197,7 @@ function homePage() {
           <div class="section-head">
             <div>
               <p class="eyebrow">Directory</p>
-              <h2>OEMs and Vendors already shaped for launch</h2>
+              <h2>OEMs and Resellers already shaped for launch</h2>
             </div>
             <a class="button" href="#/directory">View all</a>
           </div>
@@ -269,8 +271,8 @@ function directoryPage() {
   return shell(`
     <main class="page">
       <header class="page-head">
-        <p class="eyebrow">OEMs and Vendors on Dome</p>
-        <h1>Find an OEM or Vendor to grow with.</h1>
+        <p class="eyebrow">OEMs and Resellers on Dome</p>
+        <h1>Find an OEM or Reseller to grow with.</h1>
         <p>Search by business name, city, category or role. Sign in or register to request authorization, send enquiries, and use member-only contact workflows.</p>
       </header>
       <div class="container">
@@ -312,9 +314,10 @@ function profilePage(id) {
             <p>${escapeHtml(business.description)}</p>
             <div class="hero-actions">
               ${isOem ? `<a class="button" href="#/request-authorization/${business.id}">Request authorization</a>` : ""}
-              <a class="button secondary" href="#/contact/${business.id}">Send enquiry</a>
+              ${isOem ? `<button class="button secondary" data-action="reveal-contact" data-business-id="${business.id}">Reveal contact info</button>` : `<a class="button secondary" href="#/contact/${business.id}">Send enquiry</a>`}
               ${canCall ? `<a class="button warn" href="tel:${escapeHtml(business.phone || "")}">Call ${escapeHtml(business.name)}</a>` : `<span class="tag">Calling ${business.callingActiveUntil ? "visible after sign-in" : "coming up"}</span>`}
             </div>
+            <div id="revealNotice" style="margin-top:16px"></div>
           </div>
           <div class="big-avatar">${escapeHtml(business.initials)}</div>
         </div>
@@ -420,50 +423,38 @@ function registerPage() {
   return shell(`
     <main class="page">
       <header class="page-head">
-        <p class="eyebrow">Member registration</p>
-        <h1>Join Dome with admin approval.</h1>
-        <p>New OEM, Vendor and Buyer accounts enter a pending queue. Mobile OTP is required so the production workflow starts with clean contact data.</p>
+        <p class="eyebrow">Verified identity</p>
+        <h1>Join Dome with phone and email verification.</h1>
+        <p>Registration captures only your login identity. Business details move into the role-specific profile after verification.</p>
       </header>
       <div class="container split">
         <form class="card" id="registerForm">
           <div id="formNotice"></div>
           <div class="form-grid">
-            <label><span class="label">Role</span><select class="select" name="role" required><option>Vendor</option><option>OEM</option><option>Buyer</option></select></label>
-            <label><span class="label">Primary category</span><select class="select" name="category" required>${state.boot.categories.map((item) => `<option>${escapeHtml(item)}</option>`).join("")}</select></label>
-            <label><span class="label">Business/organization name</span><input class="input" name="businessName" required></label>
-            <label><span class="label">Legal name</span><input class="input" name="legalName" placeholder="Optional if same as business name"></label>
-            <label><span class="label">Contact person</span><input class="input" name="contactName" required></label>
-            <label><span class="label">Designation</span><input class="input" name="designation" placeholder="Owner, Sales Head, Procurement Officer"></label>
             <label><span class="label">Email</span><input class="input" name="email" type="email" required></label>
             <label><span class="label">Mobile number</span><input class="input" name="phone" placeholder="+91XXXXXXXXXX" required></label>
-            <label><span class="label">City</span><input class="input" name="city" required></label>
-            <label><span class="label">State</span><input class="input" name="state" required></label>
-            <label><span class="label">GSTIN</span><input class="input" name="gst" maxlength="15" placeholder="Optional at launch, required for verification phase"></label>
-            <label><span class="label">PAN</span><input class="input" name="pan" maxlength="10" placeholder="Optional at launch"></label>
-            <label><span class="label">GeM profile/listing URL</span><input class="input" name="gemUrl" type="url" placeholder="https://gem.gov.in/..."></label>
-            <label><span class="label">Website</span><input class="input" name="website" type="url" placeholder="https://"></label>
-            <label class="full"><span class="label">What do you need from Dome?</span><textarea class="textarea" name="need" placeholder="Authorization, reseller discovery, buyer visibility, onboarding help..."></textarea></label>
-            <label><span class="label">Password</span><input class="input" name="password" type="password" minlength="8" required placeholder="Minimum 8 characters with letters and numbers"></label>
-            <label><span class="label">How did you hear about Dome?</span><input class="input" name="source" placeholder="PrintoDome, webinar, referral, search"></label>
-            <label class="full"><input type="checkbox" name="consent" required> I accept the Terms, Privacy Policy and consent to Dome using this data to review my membership application.</label>
+            <label><span class="label">Phone OTP</span><input class="input" name="phoneOtp" placeholder="123456"></label>
+            <label><span class="label">Email OTP</span><input class="input" name="emailOtp" placeholder="123456"></label>
+            <label class="full"><input type="checkbox" name="consent" required> I accept the Terms, Privacy Policy and consent to Dome creating my verified account.</label>
             <label class="full"><input type="checkbox" name="marketingConsent"> I agree to receive useful Dome learning and event updates.</label>
           </div>
           <div class="form-actions">
-            <button class="button secondary" type="button" data-action="send-otp">Send OTP</button>
-            <input class="input" name="otp" placeholder="Enter OTP" style="max-width:160px">
-            <button class="button secondary" type="button" data-action="verify-otp">Verify OTP</button>
-            <button class="button" type="submit">Submit for approval</button>
+            <button class="button secondary" type="button" data-action="send-phone-otp">Send phone OTP</button>
+            <button class="button secondary" type="button" data-action="verify-phone-otp">Verify phone</button>
+            <button class="button secondary" type="button" data-action="send-email-otp">Send email OTP</button>
+            <button class="button secondary" type="button" data-action="verify-email-otp">Verify email</button>
+            <button class="button" type="submit">Create account</button>
           </div>
         </form>
         <aside class="grid">
           <div class="card">
-            <h2>Production-ready capture</h2>
-            <p>The form captures the fields needed for admin screening, contact verification, profile setup and future legal/privacy requirements.</p>
+            <h2>Why so little?</h2>
+            <p>Identity should be fast. GST, GeM seller ID, categories, contact people, products and order counts belong in the profile where the form changes by user type.</p>
           </div>
           <div class="card">
-            <h2>After approval</h2>
-            <p>OEMs and Vendors should complete onboarding or request paid admin-assisted setup. Buyers can search and message suppliers after approval.</p>
-            <a class="button secondary" href="#/setup-request">Request admin setup</a>
+            <h2>After signup</h2>
+            <p>Choose Reseller, OEM or Buyer, complete the right profile, then unlock discovery, paid microsites and contact reveal workflows.</p>
+            <a class="button secondary" href="#/profile-setup">Open profile setup</a>
           </div>
         </aside>
       </div>
@@ -508,20 +499,23 @@ function dashboardPage() {
   const role = state.user.role;
   const isAdminUser = role === "Admin";
   const isOem = role === "OEM";
-  const isVendor = role === "Vendor";
+  const isVendor = role === "Vendor" || role === "Reseller";
   const cards = isAdminUser ? [
     ["Pending approvals", "Review member applications", "#/admin"],
     ["Setup requests", "Fulfil paid admin-assisted setup", "#/admin"],
     ["Audit trail", "Track platform decisions", "#/admin"]
   ] : isOem ? [
+    ["Complete profile", "GST, products, contacts and paid microsite", "#/profile-setup"],
     ["Vendor discovery", "Find capable resellers", "#/directory"],
     ["Authorization requests", "Review and advance partner requests", "#/admin"],
     ["Sales kits", "File sharing is coming up", "#/learn"]
   ] : isVendor ? [
+    ["Complete profile", "GST, GeM seller ID, categories and order count", "#/profile-setup"],
     ["OEM discovery", "Request authorization from profiles", "#/directory?type=OEM"],
     ["My microsite", "Your public profile shows authorized OEMs", `#/profile/${state.user.businessId || "shyam"}`],
     ["Orders", "PO tracking is coming up after deeper workflow build", "#/about"]
   ] : [
+    ["Complete profile", "Choose Buyer, Reseller or OEM details", "#/profile-setup"],
     ["Supplier search", "Find OEMs and Vendors", "#/directory"],
     ["Messages", "Enquiry capture is live, inbox is coming up", "#/directory"],
     ["Webinars", "Register for learning sessions", "#/webinars"]
@@ -541,6 +535,66 @@ function dashboardPage() {
             <p>${text}</p>
           </a>
         `).join("")}
+      </div>
+    </main>
+  `);
+}
+
+function profileSetupPage() {
+  if (!state.user) return loginPage();
+  const role = state.profile?.role || (state.user.role === "OEM" ? "OEM" : state.user.role === "Buyer" ? "Buyer" : "Reseller");
+  return shell(`
+    <main class="page">
+      <header class="page-head">
+        <p class="eyebrow">Profile setup</p>
+        <h1>Complete your ${escapeHtml(role)} profile.</h1>
+        <p>Business details live here, not in registration. This keeps signup fast while still giving Dome the data needed for verification, matching and paid discovery.</p>
+      </header>
+      <div class="container split">
+        <form class="card" id="profileForm">
+          <div id="formNotice"></div>
+          <div class="form-grid">
+            <label><span class="label">I am joining as</span><select class="select" name="role" data-profile-role>
+              ${["Reseller", "OEM", "Buyer"].map((item) => `<option ${item === role ? "selected" : ""}>${item}</option>`).join("")}
+            </select></label>
+            <label><span class="label">Business / organization name</span><input class="input" name="businessName" required value="${escapeHtml(state.profile?.businessName || "")}"></label>
+            <label><span class="label">GST Number</span><input class="input" name="gstNumber" maxlength="15" value="${escapeHtml(state.profile?.gstNumber || "")}"></label>
+            <label><span class="label">Orders completed on GeM</span><input class="input" name="ordersCompleted" type="number" min="0" value="${escapeHtml(state.profile?.ordersCompleted || "")}"></label>
+            <label><span class="label">State</span><input class="input" name="state" value="${escapeHtml(state.profile?.state || "")}"></label>
+            <label><span class="label">City</span><input class="input" name="city" value="${escapeHtml(state.profile?.city || "")}"></label>
+            <label><span class="label">Contact person</span><input class="input" name="contactPerson" value="${escapeHtml(state.profile?.contactPerson || "")}"></label>
+            ${role === "Reseller" ? `
+              <label><span class="label">GeM seller ID</span><input class="input" name="gemSellerId" value="${escapeHtml(state.profile?.gemSellerId || "")}"></label>
+              <label class="full"><span class="label">OEM categories looking for</span><input class="input" name="lookingForCategories" placeholder="Printer Cartridges, IT Hardware" value="${escapeHtml((state.profile?.lookingForCategories || []).join(", "))}"></label>
+            ` : ""}
+            ${role === "OEM" ? `
+              <label><span class="label">GeM listing/profile link</span><input class="input" name="gemLink" type="url" value="${escapeHtml(state.profile?.gemLink || "")}"></label>
+              <label class="full"><span class="label">Products</span><textarea class="textarea" name="products" placeholder="One product per line">${escapeHtml((state.profile?.products || []).map((item) => item.name || item).join("\n"))}</textarea></label>
+              <label class="full"><span class="label">Contact list</span><textarea class="textarea" name="contactList" placeholder="Purpose | Name | Phone | Email">${escapeHtml((state.profile?.contactList || []).map((item) => [item.purpose, item.name, item.phone, item.email].filter(Boolean).join(" | ")).join("\n"))}</textarea></label>
+              <label class="full"><input type="checkbox" name="micrositeRequested" ${state.profile?.micrositeRequested ? "checked" : ""}> Activate OEM microsite as a paid feature</label>
+            ` : ""}
+            <label class="full"><span class="label">About the business</span><textarea class="textarea" name="about">${escapeHtml(state.profile?.about || "")}</textarea></label>
+          </div>
+          <div class="form-actions">
+            <button class="button secondary" type="button" data-action="lookup-gst">Lookup GST</button>
+            <button class="button" type="submit">Save profile</button>
+          </div>
+        </form>
+        <aside class="grid">
+          <div class="card">
+            <h2>Profile completion</h2>
+            <p class="notice">${state.profile?.completion || 0}% complete. Profiles above 80% become review-ready for directory and partnership workflows.</p>
+          </div>
+          <div class="card">
+            <h2>GST API</h2>
+            <p>Dome can connect to a GST provider. Demo mode shows clearly marked sample lookup data until provider credentials are added.</p>
+            ${state.gstLookup ? `<p class="notice"><strong>${escapeHtml(state.gstLookup.result.tradeName || state.gstLookup.result.legalName)}</strong><br>${escapeHtml(state.gstLookup.result.status)} - ${escapeHtml(state.gstLookup.mode)} lookup</p>` : ""}
+          </div>
+          <div class="card">
+            <h2>Paid OEM microsite</h2>
+            <p>For OEMs, saved profile data becomes the content source for their public microsite. Activation is recorded as a paid feature.</p>
+          </div>
+        </aside>
       </div>
     </main>
   `);
@@ -620,12 +674,15 @@ function contactFields(includeOrganization = false) {
 
 function adminPage() {
   if (state.user?.role !== "Admin") return loginPage();
-  const admin = state.admin || { applications: [], contacts: [], authorizationRequests: [], setupRequests: [], webinarRegistrations: [], payments: [], auditLog: [] };
+  const admin = state.admin || { applications: [], businessProfiles: [], contacts: [], authorizationRequests: [], revealPurchases: [], revealBundles: [], setupRequests: [], webinarRegistrations: [], payments: [], auditLog: [] };
   const tab = state.adminTab;
   const rows = {
     applications: admin.applications,
+    profiles: admin.businessProfiles || [],
     contacts: admin.contacts,
     authorizations: admin.authorizationRequests,
+    reveals: admin.revealPurchases || [],
+    bundles: admin.revealBundles || [],
     setup: admin.setupRequests,
     webinars: admin.webinarRegistrations,
     payments: admin.payments,
@@ -696,8 +753,20 @@ async function onSubmit(event) {
     const payload = formPayload(form);
     if (form.id === "registerForm") {
       const result = await api("/api/register", { method: "POST", body: JSON.stringify(payload) });
-      notice(`Application submitted for ${result.application.businessName}. Admin approval is required before login.`, "");
-      form.reset();
+      state.user = result.user;
+      state.token = result.token;
+      localStorage.setItem("domeUser", JSON.stringify(result.user));
+      localStorage.setItem("domeToken", result.token);
+      notice("Identity verified. Opening profile setup...");
+      setTimeout(() => setRoute("/profile-setup"), 500);
+    }
+    if (form.id === "profileForm") {
+      payload.gstLookup = state.gstLookup;
+      const result = await api("/api/profile", { method: "POST", body: JSON.stringify(payload) });
+      state.user = result.user;
+      state.profile = result.profile;
+      localStorage.setItem("domeUser", JSON.stringify(result.user));
+      notice(`Profile saved. Completion is ${result.profile.completion}%.`);
     }
     if (form.id === "loginForm") {
       const result = await api("/api/session", { method: "POST", body: JSON.stringify(payload) });
@@ -748,24 +817,68 @@ async function handleClick(event) {
     state.token = "";
     setRoute("/");
   }
-  if (action === "send-otp") {
+  if (action === "send-phone-otp" || action === "send-otp") {
     const form = document.querySelector("#registerForm");
     try {
       const payload = formPayload(form);
-      const result = await api("/api/otp/start", { method: "POST", body: JSON.stringify({ phone: payload.phone, purpose: "registration" }) });
-      notice(result.devCode ? `OTP sent in development mode. Use ${result.devCode}.` : "OTP sent.");
+      const result = await api("/api/otp/start", { method: "POST", body: JSON.stringify({ channel: "phone", phone: payload.phone, purpose: "registration" }) });
+      notice(result.devCode ? `Phone OTP sent in demo mode. Use ${result.devCode}.` : "Phone OTP sent.");
     } catch (error) {
       notice(error.message, "error");
     }
   }
-  if (action === "verify-otp") {
+  if (action === "verify-phone-otp" || action === "verify-otp") {
     const form = document.querySelector("#registerForm");
     try {
       const payload = formPayload(form);
-      await api("/api/otp/verify", { method: "POST", body: JSON.stringify({ phone: payload.phone, code: payload.otp }) });
+      await api("/api/otp/verify", { method: "POST", body: JSON.stringify({ channel: "phone", phone: payload.phone, code: payload.phoneOtp || payload.otp }) });
       notice("Mobile number verified.");
     } catch (error) {
       notice(error.message, "error");
+    }
+  }
+  if (action === "send-email-otp") {
+    const form = document.querySelector("#registerForm");
+    try {
+      const payload = formPayload(form);
+      const result = await api("/api/otp/start", { method: "POST", body: JSON.stringify({ channel: "email", email: payload.email, purpose: "registration" }) });
+      notice(result.devCode ? `Email OTP sent in demo mode. Use ${result.devCode}.` : "Email OTP sent.");
+    } catch (error) {
+      notice(error.message, "error");
+    }
+  }
+  if (action === "verify-email-otp") {
+    const form = document.querySelector("#registerForm");
+    try {
+      const payload = formPayload(form);
+      await api("/api/otp/verify", { method: "POST", body: JSON.stringify({ channel: "email", email: payload.email, code: payload.emailOtp }) });
+      notice("Email address verified.");
+    } catch (error) {
+      notice(error.message, "error");
+    }
+  }
+  if (action === "lookup-gst") {
+    const form = document.querySelector("#profileForm");
+    try {
+      const payload = formPayload(form);
+      state.gstLookup = await api("/api/gst/lookup", { method: "POST", body: JSON.stringify({ gstNumber: payload.gstNumber }) });
+      notice(`GST lookup ready: ${state.gstLookup.result.tradeName || state.gstLookup.result.legalName}.`);
+    } catch (error) {
+      notice(error.message, "error");
+    }
+  }
+  if (action === "reveal-contact") {
+    const businessId = event.target.closest("[data-business-id]")?.dataset.businessId;
+    const target = document.querySelector("#revealNotice");
+    if (!state.user || !state.token) {
+      if (target) target.innerHTML = `<p class="notice warn">Please log in or register before revealing OEM contact information.</p>`;
+      return;
+    }
+    try {
+      const result = await api("/api/reveal-contact", { method: "POST", body: JSON.stringify({ businessId }) });
+      if (target) target.innerHTML = `<p class="notice"><strong>${escapeHtml(result.contact.businessName)}</strong><br>Phone: ${escapeHtml(result.contact.phone)}<br>Email: ${escapeHtml(result.contact.email)}<br>${result.bundle.creditsRemaining} reveal credits remaining.</p>`;
+    } catch (error) {
+      if (target) target.innerHTML = `<p class="notice error">${escapeHtml(error.message)}</p>`;
     }
   }
   if (action === "load-admin") {
@@ -821,6 +934,11 @@ async function loadAdmin(shouldRender = true) {
 }
 
 function handleInput(event) {
+  if (event.target.matches("[data-profile-role]")) {
+    state.profile = { ...(state.profile || {}), role: event.target.value };
+    render();
+    return;
+  }
   const filter = event.target.dataset.filter;
   if (filter) {
     state.filters[filter] = event.target.value;
@@ -845,6 +963,7 @@ function render() {
   else if (route === "/register") html = registerPage();
   else if (route === "/login") html = loginPage();
   else if (route === "/dashboard") html = dashboardPage();
+  else if (route === "/profile-setup") html = profileSetupPage();
   else if (route === "/admin") html = adminPage();
   else if (pathname === "contact") html = simpleFormPage("contact", id);
   else if (pathname === "request-authorization") html = simpleFormPage("authorization", id);
@@ -866,11 +985,31 @@ async function refreshAdminOnRoute() {
 
 async function init() {
   state.boot = await loadBootstrapWithRetry();
+  if (state.user && !state.token) {
+    localStorage.removeItem("domeUser");
+    state.user = null;
+  }
   if (state.user?.role === "Admin") {
     try {
       state.admin = await api("/api/admin", { headers: { "x-admin-key": state.adminKey } });
     } catch {
       state.admin = null;
+    }
+  }
+  if (state.user && state.token) {
+    try {
+      const current = await api("/api/profile");
+      state.user = current.user;
+      state.profile = current.profile;
+      localStorage.setItem("domeUser", JSON.stringify(current.user));
+    } catch (error) {
+      state.profile = null;
+      if (!state.token || /sign in|required|session/i.test(error.message)) {
+        localStorage.removeItem("domeUser");
+        localStorage.removeItem("domeToken");
+        state.user = null;
+        state.token = "";
+      }
     }
   }
   render();

@@ -11,6 +11,8 @@ services:
         value: production
       - key: DATA_FILE
         value: data/dome-db.json
+      - key: PAYMENT_MODE
+        value: mock
       - key: ADMIN_KEY
         sync: false
       - key: SESSION_SECRET

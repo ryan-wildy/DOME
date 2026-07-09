@@ -13,6 +13,9 @@ const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const ADMIN_KEY = process.env.ADMIN_KEY || (IS_PRODUCTION ? "" : "DOMEADMIN");
 const SESSION_SECRET = process.env.SESSION_SECRET || (IS_PRODUCTION ? crypto.randomBytes(32).toString("hex") : "change-this-before-production");
 const OTP_TTL_MS = 10 * 60 * 1000;
+const REVEAL_BUNDLE_PRICE = 500;
+const REVEAL_BUNDLE_CREDITS = 5;
+const PAYMENT_MODE = process.env.PAYMENT_MODE || "mock";
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -256,7 +259,7 @@ const webinars = [
 ];
 
 const users = [
-  { role: "Vendor", email: "vendor@dome.com", password: "vendor123", businessName: "Shyam Enterprises", businessId: "shyam", status: "approved" },
+  { role: "Reseller", email: "vendor@dome.com", password: "vendor123", businessName: "Shyam Enterprises", businessId: "shyam", status: "approved" },
   { role: "OEM", email: "oem@dome.com", password: "oem123", businessName: "PrintoDome", businessId: "printodome", status: "approved" },
   { role: "Buyer", email: "buyer@dome.com", password: "buyer123", businessName: "City Buyer Office", status: "approved" },
   { role: "Admin", email: "admin@dome.com", password: "admin123", businessName: "Dome Admin", status: "approved" }
@@ -336,6 +339,38 @@ async function seedDb() {
     ],
     contacts: [],
     authorizationRequests: [],
+    revealPurchases: [],
+    revealBundles: [],
+    businessProfiles: [
+      {
+        userEmail: "vendor@dome.com",
+        role: "Reseller",
+        completion: 100,
+        state: "Delhi",
+        city: "New Delhi",
+        contactPerson: "Shyam Kumar",
+        gstNumber: "07ABCDE1234F1Z5",
+        gemSellerId: "GEM/2020/B/SHYAM",
+        lookingForCategories: ["Printer Cartridges", "IT Hardware"],
+        ordersCompleted: 86,
+        profileStatus: "verified"
+      },
+      {
+        userEmail: "oem@dome.com",
+        role: "OEM",
+        completion: 100,
+        gstNumber: "07PRINT1234F1Z8",
+        ordersCompleted: 4300,
+        gemLink: "https://gem.gov.in",
+        products: ["X-Range Colour Laser Cartridge", "Drum Unit DU-220", "Inkjet Cartridge IJ-310"],
+        contactList: [
+          { purpose: "Reseller onboarding", name: "Channel Desk", phone: "+91 98765 41000", email: "growth@printodome.in" },
+          { purpose: "Buyer enquiries", name: "Government Sales", phone: "+91 98765 41010", email: "sales@printodome.in" }
+        ],
+        micrositePaidUntil: "2027-03-31",
+        profileStatus: "verified"
+      }
+    ],
     setupRequests: [],
     webinarRegistrations: [],
     payments: [],
@@ -344,16 +379,40 @@ async function seedDb() {
   };
 }
 
+function migrateDb(db) {
+  db.users ||= [];
+  db.applications ||= [];
+  db.contacts ||= [];
+  db.authorizationRequests ||= [];
+  db.revealPurchases ||= [];
+  db.revealBundles ||= [];
+  db.businessProfiles ||= [];
+  db.setupRequests ||= [];
+  db.webinarRegistrations ||= [];
+  db.payments ||= [];
+  db.auditLog ||= [];
+  db.otps ||= [];
+  for (const user of db.users) {
+    if (user.role === "Vendor") user.role = "Reseller";
+    user.emailVerified = Boolean(user.emailVerified || user.status === "approved");
+    user.phoneVerified = Boolean(user.phoneVerified || user.status === "approved");
+  }
+  for (const app of db.applications) {
+    if (app.role === "Vendor") app.role = "Reseller";
+  }
+  return db;
+}
+
 async function ensureDb() {
   if (dbCache) return dbCache;
   if (dbInitPromise) return dbInitPromise;
   dbInitPromise = (async () => {
     try {
       const raw = await fs.readFile(DATA_FILE, "utf8");
-      dbCache = JSON.parse(raw);
+      dbCache = migrateDb(JSON.parse(raw));
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
-      dbCache = await seedDb();
+      dbCache = migrateDb(await seedDb());
       await saveDb();
     }
     return dbCache;
@@ -374,6 +433,12 @@ function publicBootstrap(db) {
     categories: db.categories,
     content: db.content,
     webinars: db.webinars,
+    config: {
+      revealBundlePrice: REVEAL_BUNDLE_PRICE,
+      revealBundleCredits: REVEAL_BUNDLE_CREDITS,
+      paymentMode: PAYMENT_MODE,
+      gstLookupMode: process.env.GST_API_URL ? "provider" : "demo"
+    },
     counts: {
       applications: db.applications.length,
       approvedUsers: db.users.filter((user) => user.status === "approved").length,
@@ -514,9 +579,12 @@ function cleanUser(user) {
     role: user.role,
     email: user.email,
     phone: user.phone || "",
+    emailVerified: Boolean(user.emailVerified),
+    phoneVerified: Boolean(user.phoneVerified),
     businessName: user.businessName,
     businessId: user.businessId || "",
-    status: user.status
+    status: user.status,
+    profileComplete: Boolean(user.profileComplete)
   };
 }
 
@@ -531,7 +599,124 @@ function addAudit(db, actor, action, detail) {
   db.auditLog = db.auditLog.slice(0, 300);
 }
 
-async function sendOtp(phone, code) {
+function slugify(value) {
+  return String(value || "business")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 50) || crypto.randomUUID().slice(0, 8);
+}
+
+function initialsFor(value) {
+  const words = String(value || "Dome").trim().split(/\s+/).slice(0, 2);
+  return words.map((word) => word[0]?.toUpperCase() || "").join("") || "D";
+}
+
+function profileCompletion(role, profile) {
+  const checks = role === "OEM"
+    ? ["businessName", "gstNumber", "ordersCompleted", "products", "gemLink", "contactList"]
+    : role === "Reseller"
+      ? ["businessName", "state", "city", "contactPerson", "gstNumber", "gemSellerId", "lookingForCategories", "ordersCompleted"]
+      : ["businessName", "contactPerson", "state", "city"];
+  const complete = checks.filter((field) => {
+    const value = profile[field];
+    return Array.isArray(value) ? value.length > 0 : String(value ?? "").trim().length > 0;
+  }).length;
+  return Math.round((complete / checks.length) * 100);
+}
+
+function syncBusinessFromProfile(db, user, profile) {
+  if (!["OEM", "Reseller"].includes(profile.role)) return;
+  if (profile.role === "OEM" && !profile.micrositePaidUntil) return;
+  const id = user.businessId || slugify(profile.businessName);
+  let business = db.businesses.find((item) => item.id === id);
+  if (!business) {
+    business = { id };
+    db.businesses.push(business);
+  }
+  user.businessId = id;
+  user.businessName = profile.businessName || user.businessName;
+  business.type = profile.role === "Reseller" ? "Vendor" : "OEM";
+  business.name = profile.businessName || user.businessName;
+  business.initials = initialsFor(business.name);
+  business.category = profile.role === "OEM" ? (profile.products?.[0]?.category || profile.primaryCategory || "General") : (profile.lookingForCategories?.[0] || "General");
+  business.city = profile.city || business.city || "";
+  business.rating = business.rating || 4.2;
+  business.network = profile.role === "OEM" ? `${Number(profile.ordersCompleted || 0).toLocaleString("en-IN")} orders` : `${Number(profile.ordersCompleted || 0).toLocaleString("en-IN")} orders`;
+  business.phone = profile.contactList?.[0]?.phone || profile.phone || user.phone;
+  business.email = profile.contactList?.[0]?.email || user.email;
+  business.gemUrl = profile.gemLink || business.gemUrl || "https://gem.gov.in";
+  business.description = profile.about || `${business.name} is building its GeM growth profile on Dome.`;
+  business.products = profile.products?.map((item) => item.name || item).filter(Boolean) || business.products || [];
+  business.highlights = [
+    `${Number(profile.ordersCompleted || 0).toLocaleString("en-IN")} GeM orders completed`,
+    profile.gstNumber ? "GST captured" : "GST pending",
+    profile.micrositePaidUntil ? "Microsite active" : "Microsite payment pending"
+  ];
+}
+
+function profileForUser(db, user) {
+  return db.businessProfiles.find((profile) => profile.userId === user.id || profile.userEmail === user.email);
+}
+
+async function sendEmailOtp(email, code) {
+  if (process.env.RESEND_API_KEY) {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        from: process.env.EMAIL_FROM || "Dome <onboarding@resend.dev>",
+        to: email,
+        subject: "Your Dome verification code",
+        text: `Your Dome verification code is ${code}. It expires in 10 minutes.`
+      })
+    });
+    if (!response.ok) throw new Error(`Email provider error: ${(await response.text()).slice(0, 160)}`);
+    return { sent: true, provider: "resend" };
+  }
+
+  if (process.env.SENDGRID_API_KEY) {
+    const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${process.env.SENDGRID_API_KEY}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email }] }],
+        from: { email: process.env.EMAIL_FROM || "no-reply@example.com", name: "Dome" },
+        subject: "Your Dome verification code",
+        content: [{ type: "text/plain", value: `Your Dome verification code is ${code}. It expires in 10 minutes.` }]
+      })
+    });
+    if (!response.ok) throw new Error(`Email provider error: ${(await response.text()).slice(0, 160)}`);
+    return { sent: true, provider: "sendgrid" };
+  }
+
+  return { sent: false, provider: "dev" };
+}
+
+async function sendSmsOtp(phone, code) {
+  if (process.env.MSG91_AUTH_KEY && process.env.MSG91_TEMPLATE_ID) {
+    const response = await fetch("https://control.msg91.com/api/v5/otp", {
+      method: "POST",
+      headers: {
+        authkey: process.env.MSG91_AUTH_KEY,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        template_id: process.env.MSG91_TEMPLATE_ID,
+        mobile: phone.replace(/^\+/, ""),
+        otp: code
+      })
+    });
+    if (!response.ok) throw new Error(`SMS provider error: ${(await response.text()).slice(0, 160)}`);
+    return { sent: true, provider: "msg91" };
+  }
+
   const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM } = process.env;
   if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_FROM) {
     return { sent: false, provider: "dev" };
@@ -559,6 +744,29 @@ async function sendOtp(phone, code) {
   return { sent: true, provider: "twilio" };
 }
 
+async function sendOtp(target, code, channel) {
+  return channel === "email" ? sendEmailOtp(target, code) : sendSmsOtp(target, code);
+}
+
+function otpTarget(payload) {
+  const channel = payload.channel === "email" ? "email" : "phone";
+  const target = channel === "email"
+    ? String(payload.email || payload.target || "").toLowerCase().trim()
+    : normalizePhone(payload.phone || payload.target);
+  return { channel, target };
+}
+
+function hasVerifiedOtp(db, target, channel, purpose = "registration") {
+  return db.otps.some((entry) => {
+    const entryTarget = entry.target || entry.phone;
+    return entryTarget === target
+      && entry.channel === channel
+      && entry.verified
+      && (!entry.purpose || entry.purpose === purpose)
+      && new Date(entry.expiresAt).getTime() > Date.now();
+  });
+}
+
 async function api(req, res, pathname) {
   const db = await ensureDb();
 
@@ -572,6 +780,9 @@ async function api(req, res, pathname) {
       applications: db.applications,
       contacts: db.contacts,
       authorizationRequests: db.authorizationRequests,
+      revealPurchases: db.revealPurchases,
+      revealBundles: db.revealBundles,
+      businessProfiles: db.businessProfiles,
       setupRequests: db.setupRequests,
       webinarRegistrations: db.webinarRegistrations,
       payments: db.payments,
@@ -582,19 +793,24 @@ async function api(req, res, pathname) {
 
   if (req.method === "POST" && pathname === "/api/otp/start") {
     const payload = await readBody(req);
-    const phone = normalizePhone(payload.phone);
-    if (!isPhone(phone)) return json(res, 422, { error: "Enter a valid mobile number with country code or 10 Indian digits." });
-    const code = process.env.NODE_ENV === "production" && process.env.TWILIO_ACCOUNT_SID
+    const { channel, target } = otpTarget(payload);
+    if (channel === "email" && !isEmail(target)) return json(res, 422, { error: "Enter a valid email address." });
+    if (channel === "phone" && !isPhone(target)) return json(res, 422, { error: "Enter a valid mobile number with country code or 10 Indian digits." });
+    const hasLiveProvider = channel === "email"
+      ? Boolean(process.env.RESEND_API_KEY || process.env.SENDGRID_API_KEY)
+      : Boolean(process.env.MSG91_AUTH_KEY || process.env.TWILIO_ACCOUNT_SID);
+    const code = process.env.NODE_ENV === "production" && hasLiveProvider
       ? String(crypto.randomInt(100000, 999999))
       : "123456";
     const expiresAt = new Date(Date.now() + OTP_TTL_MS).toISOString();
-    db.otps = db.otps.filter((otp) => otp.phone !== phone || otp.verified);
-    db.otps.push({ phone, codeHash: crypto.createHash("sha256").update(code).digest("hex"), purpose: payload.purpose || "registration", expiresAt, verified: false });
-    const result = await sendOtp(phone, code);
+    db.otps = db.otps.filter((otp) => (otp.target || otp.phone) !== target || otp.channel !== channel || otp.verified);
+    db.otps.push({ target, channel, codeHash: crypto.createHash("sha256").update(code).digest("hex"), purpose: payload.purpose || "registration", expiresAt, verified: false });
+    const result = await sendOtp(target, code, channel);
     await saveDb();
     return json(res, 200, {
       ok: true,
-      phone,
+      target,
+      channel,
       expiresAt,
       provider: result.provider,
       devCode: result.provider === "dev" ? code : undefined
@@ -603,72 +819,60 @@ async function api(req, res, pathname) {
 
   if (req.method === "POST" && pathname === "/api/otp/verify") {
     const payload = await readBody(req);
-    const phone = normalizePhone(payload.phone);
+    const { channel, target } = otpTarget(payload);
     const codeHash = crypto.createHash("sha256").update(String(payload.code || "")).digest("hex");
-    const record = db.otps.find((otp) => otp.phone === phone && otp.codeHash === codeHash && new Date(otp.expiresAt).getTime() > Date.now());
+    const record = db.otps.find((otp) => (otp.target || otp.phone) === target && otp.channel === channel && otp.codeHash === codeHash && new Date(otp.expiresAt).getTime() > Date.now());
     if (!record) return json(res, 422, { error: "The OTP is invalid or expired." });
     record.verified = true;
+    record.verifiedAt = new Date().toISOString();
     await saveDb();
-    return json(res, 200, { ok: true, phone });
+    return json(res, 200, { ok: true, target, channel });
   }
 
   if (req.method === "POST" && pathname === "/api/register") {
     const payload = await readBody(req);
-    const missing = required(payload, ["role", "businessName", "city", "state", "category", "contactName", "email", "phone", "password"]);
+    const missing = required(payload, ["email", "phone"]);
     if (missing.length) return json(res, 422, { error: `Missing required fields: ${missing.join(", ")}` });
-    const role = String(payload.role);
-    if (!["Vendor", "OEM", "Buyer"].includes(role)) return json(res, 422, { error: "Choose Vendor, OEM or Buyer." });
     if (!isEmail(payload.email)) return json(res, 422, { error: "Enter a valid email address." });
     const phone = normalizePhone(payload.phone);
     if (!isPhone(phone)) return json(res, 422, { error: "Enter a valid mobile number." });
-    if (!validatePassword(payload.password)) return json(res, 422, { error: "Password must be at least 8 characters and include letters and numbers." });
     if (!payload.consent) return json(res, 422, { error: "Consent to Terms and Privacy Policy is required before creating an account." });
-    const otp = db.otps.find((entry) => entry.phone === phone && entry.verified && new Date(entry.expiresAt).getTime() > Date.now());
-    if (!otp) return json(res, 422, { error: "Please verify the mobile number by OTP first." });
     const email = String(payload.email).toLowerCase().trim();
-    const duplicate = db.users.some((user) => user.email === email || user.phone === phone)
-      || db.applications.some((app) => ["pending", "approved"].includes(app.status) && (app.email === email || app.phone === phone));
+    if (!hasVerifiedOtp(db, phone, "phone")) return json(res, 422, { error: "Please verify the mobile number by OTP first." });
+    if (!hasVerifiedOtp(db, email, "email")) return json(res, 422, { error: "Please verify the email address by OTP first." });
+    const duplicate = db.users.some((user) => user.email === email || user.phone === phone);
     if (duplicate) return json(res, 409, { error: "An account or application already exists with this email or phone." });
 
-    const application = {
+    const role = ["OEM", "Reseller", "Buyer"].includes(payload.role) ? payload.role : "Member";
+    const user = {
       id: crypto.randomUUID(),
       role,
-      businessName: String(payload.businessName).trim(),
-      legalName: String(payload.legalName || "").trim(),
-      city: String(payload.city).trim(),
-      state: String(payload.state).trim(),
-      category: String(payload.category).trim(),
-      contactName: String(payload.contactName).trim(),
-      designation: String(payload.designation || "").trim(),
       email,
       phone,
-      gst: String(payload.gst || "").trim(),
-      pan: String(payload.pan || "").trim(),
-      gemUrl: String(payload.gemUrl || "").trim(),
-      website: String(payload.website || "").trim(),
-      need: String(payload.need || "").trim(),
-      source: String(payload.source || "").trim(),
-      consent: Boolean(payload.consent),
-      marketingConsent: Boolean(payload.marketingConsent),
-      status: "pending",
+      businessName: role === "Member" ? "Profile pending" : `${role} profile pending`,
+      businessId: "",
+      status: "approved",
+      emailVerified: true,
+      phoneVerified: true,
+      profileComplete: false,
+      passwordHash: payload.password && validatePassword(payload.password) ? await hashPassword(payload.password) : await hashPassword(crypto.randomBytes(18).toString("hex")),
       createdAt: new Date().toISOString()
     };
-    db.applications.unshift(application);
-    db.users.push({
+    db.users.push(user);
+    db.applications.unshift({
       id: crypto.randomUUID(),
       role,
       email,
       phone,
-      businessName: application.businessName,
-      businessId: "",
-      status: "pending",
-      passwordHash: await hashPassword(payload.password),
-      createdAt: application.createdAt,
-      applicationId: application.id
+      status: "identity_verified",
+      createdAt: user.createdAt,
+      consent: Boolean(payload.consent),
+      marketingConsent: Boolean(payload.marketingConsent),
+      source: "identity_registration"
     });
-    addAudit(db, "system", "registration_submitted", `${role} ${application.businessName}`);
+    addAudit(db, "system", "identity_registered", `${role} ${email}`);
     await saveDb();
-    return json(res, 201, { ok: true, application });
+    return json(res, 201, { ok: true, user: cleanUser(user), token: signToken(user) });
   }
 
   if (req.method === "POST" && pathname === "/api/session") {
@@ -830,7 +1034,156 @@ async function api(req, res, pathname) {
   const tokenUser = verifyToken(req);
   if (req.method === "GET" && pathname === "/api/me") {
     if (!tokenUser) return json(res, 401, { error: "Sign in required." });
-    return json(res, 200, { user: tokenUser });
+    const liveUser = db.users.find((user) => user.id === tokenUser.id) || tokenUser;
+    return json(res, 200, { user: cleanUser(liveUser), profile: profileForUser(db, liveUser) || null });
+  }
+
+  if (req.method === "GET" && pathname === "/api/profile") {
+    if (!tokenUser) return json(res, 401, { error: "Sign in required." });
+    const liveUser = db.users.find((user) => user.id === tokenUser.id);
+    if (!liveUser) return json(res, 401, { error: "Session user not found." });
+    return json(res, 200, { user: cleanUser(liveUser), profile: profileForUser(db, liveUser) || null });
+  }
+
+  if (req.method === "POST" && pathname === "/api/profile") {
+    if (!tokenUser) return json(res, 401, { error: "Sign in required." });
+    const liveUser = db.users.find((user) => user.id === tokenUser.id);
+    if (!liveUser) return json(res, 401, { error: "Session user not found." });
+    const payload = await readBody(req);
+    const role = payload.role === "OEM" ? "OEM" : payload.role === "Buyer" ? "Buyer" : "Reseller";
+    const previousProfile = profileForUser(db, liveUser);
+    const hadMicrosite = Boolean(previousProfile?.micrositePaidUntil);
+    const profile = {
+      ...(previousProfile || {}),
+      id: previousProfile?.id || crypto.randomUUID(),
+      userId: liveUser.id,
+      userEmail: liveUser.email,
+      role,
+      businessName: String(payload.businessName || "").trim(),
+      state: String(payload.state || "").trim(),
+      city: String(payload.city || "").trim(),
+      contactPerson: String(payload.contactPerson || "").trim(),
+      gstNumber: String(payload.gstNumber || "").trim().toUpperCase(),
+      gemSellerId: String(payload.gemSellerId || "").trim(),
+      gemLink: String(payload.gemLink || "").trim(),
+      ordersCompleted: Number(payload.ordersCompleted || 0),
+      lookingForCategories: Array.isArray(payload.lookingForCategories) ? payload.lookingForCategories : String(payload.lookingForCategories || "").split(",").map((item) => item.trim()).filter(Boolean),
+      products: Array.isArray(payload.products) ? payload.products : String(payload.products || "").split("\n").map((name) => ({ name: name.trim() })).filter((item) => item.name),
+      contactList: Array.isArray(payload.contactList) ? payload.contactList : String(payload.contactList || "").split("\n").map((line) => {
+        const [purpose = "", name = "", phone = "", email = ""] = line.split("|").map((item) => item.trim());
+        return { purpose, name, phone, email };
+      }).filter((item) => item.purpose || item.name || item.phone || item.email),
+      about: String(payload.about || "").trim(),
+      gstLookup: payload.gstLookup || null,
+      micrositeRequested: Boolean(payload.micrositeRequested),
+      micrositePaidUntil: payload.micrositePaidUntil || (payload.micrositeRequested && PAYMENT_MODE === "mock" ? "2027-03-31" : ""),
+      updatedAt: new Date().toISOString()
+    };
+    profile.completion = profileCompletion(role, profile);
+    profile.profileStatus = profile.completion >= 80 ? "review_ready" : "incomplete";
+    const existingIndex = db.businessProfiles.findIndex((item) => item.id === profile.id || item.userId === liveUser.id || item.userEmail === liveUser.email);
+    if (existingIndex >= 0) db.businessProfiles[existingIndex] = profile;
+    else db.businessProfiles.unshift(profile);
+    liveUser.role = role;
+    liveUser.businessName = profile.businessName || liveUser.businessName;
+    liveUser.profileComplete = profile.completion >= 80;
+    if (role === "OEM" && profile.micrositeRequested && !hadMicrosite) {
+      db.payments.unshift({
+        id: crypto.randomUUID(),
+        service: "OEM microsite activation",
+        payer: profile.businessName || liveUser.email,
+        amount: 4999,
+        status: PAYMENT_MODE === "mock" ? "paid_mock" : "provider_pending",
+        createdAt: new Date().toISOString()
+      });
+    }
+    syncBusinessFromProfile(db, liveUser, profile);
+    addAudit(db, liveUser.email, "profile_saved", `${role} profile ${profile.completion}%`);
+    await saveDb();
+    return json(res, 200, { ok: true, user: cleanUser(liveUser), profile });
+  }
+
+  if (req.method === "POST" && pathname === "/api/gst/lookup") {
+    const payload = await readBody(req);
+    const gstNumber = String(payload.gstNumber || "").trim().toUpperCase();
+    if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstNumber)) return json(res, 422, { error: "Enter a valid 15-character GSTIN." });
+    if (process.env.GST_API_URL && process.env.GST_API_KEY) {
+      const response = await fetch(`${process.env.GST_API_URL}?gstin=${encodeURIComponent(gstNumber)}`, {
+        headers: { authorization: `Bearer ${process.env.GST_API_KEY}` }
+      });
+      if (!response.ok) return json(res, 502, { error: "GST provider lookup failed." });
+      return json(res, 200, { ok: true, mode: "provider", result: await response.json() });
+    }
+    return json(res, 200, {
+      ok: true,
+      mode: "demo",
+      result: {
+        gstNumber,
+        legalName: "Demo GST verified business",
+        tradeName: "Dome Demo Seller",
+        stateCode: gstNumber.slice(0, 2),
+        status: "Active",
+        note: "Demo data. Connect a GST API provider before relying on this for verification."
+      }
+    });
+  }
+
+  if (req.method === "POST" && pathname === "/api/reveal-contact") {
+    if (!tokenUser) return json(res, 401, { error: "Sign in required to reveal OEM contact information." });
+    const liveUser = db.users.find((user) => user.id === tokenUser.id);
+    if (!liveUser) return json(res, 401, { error: "Session user not found." });
+    const payload = await readBody(req);
+    const business = db.businesses.find((item) => item.id === payload.businessId && item.type === "OEM");
+    if (!business) return json(res, 404, { error: "OEM profile not found." });
+    let bundle = db.revealBundles.find((item) => item.userId === liveUser.id && item.creditsRemaining > 0);
+    if (!bundle) {
+      bundle = {
+        id: crypto.randomUUID(),
+        userId: liveUser.id,
+        creditsTotal: REVEAL_BUNDLE_CREDITS,
+        creditsRemaining: PAYMENT_MODE === "mock" ? REVEAL_BUNDLE_CREDITS : 0,
+        amount: REVEAL_BUNDLE_PRICE,
+        status: PAYMENT_MODE === "mock" ? "paid_mock" : "provider_pending",
+        createdAt: new Date().toISOString()
+      };
+      db.revealBundles.unshift(bundle);
+      db.payments.unshift({
+        id: crypto.randomUUID(),
+        service: "Reveal OEM contact bundle",
+        payer: liveUser.businessName || liveUser.email,
+        amount: REVEAL_BUNDLE_PRICE,
+        status: bundle.status,
+        createdAt: bundle.createdAt
+      });
+    }
+    if (bundle.creditsRemaining <= 0) {
+      await saveDb();
+      return json(res, 402, { error: "Payment is required before contact details can be revealed.", bundle });
+    }
+    const alreadyRevealed = db.revealPurchases.find((item) => item.userId === liveUser.id && item.businessId === business.id);
+    if (!alreadyRevealed) bundle.creditsRemaining -= 1;
+    const reveal = alreadyRevealed || {
+      id: crypto.randomUUID(),
+      userId: liveUser.id,
+      businessId: business.id,
+      businessName: business.name,
+      revealedAt: new Date().toISOString()
+    };
+    if (!alreadyRevealed) db.revealPurchases.unshift(reveal);
+    addAudit(db, liveUser.email, "contact_revealed", business.name);
+    await saveDb();
+    return json(res, 200, {
+      ok: true,
+      paymentMode: PAYMENT_MODE,
+      bundle,
+      reveal,
+      contact: {
+        businessName: business.name,
+        phone: business.phone || "Contact phone pending",
+        email: business.email || "Contact email pending",
+        gemUrl: business.gemUrl || "https://gem.gov.in"
+      }
+    });
   }
 
   return json(res, 404, { error: "API endpoint not found." });

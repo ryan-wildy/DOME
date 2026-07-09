@@ -36,11 +36,48 @@ Set these environment variables in Render:
 NODE_ENV=production
 ADMIN_KEY=<strong-admin-key>
 SESSION_SECRET=<strong-session-secret>
+PAYMENT_MODE=mock
 ```
 
 Use `/healthz` as the health check path.
 
 On Render's free plan, the service can sleep after inactivity. The first visitor after a sleep may wait while the service wakes up. The code now keeps the first page lighter, adds retry messaging, and exposes `/healthz`, but a fully instant first request needs either a paid always-on instance or an external uptime monitor that pings `/healthz` regularly.
+
+## Recommended Production Providers
+
+For the India launch workflow, this build is prepared for:
+
+- Phone OTP: MSG91 first choice for India/DLT workflows, Twilio as fallback.
+- Email OTP: Resend for quick setup, SendGrid as fallback.
+- Payments: Razorpay for the Rs 500 contact reveal bundle and paid OEM microsites.
+- GST lookup: connect a GST/GSP provider behind `GST_API_URL`; the current demo mode returns clearly marked sample data.
+
+Supported environment variables:
+
+```bash
+# SMS OTP
+MSG91_AUTH_KEY=
+MSG91_TEMPLATE_ID=
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_FROM=
+
+# Email OTP
+RESEND_API_KEY=
+SENDGRID_API_KEY=
+EMAIL_FROM="Dome <verify@yourdomain.com>"
+
+# GST lookup
+GST_API_URL=
+GST_API_KEY=
+
+# Payments
+PAYMENT_MODE=mock
+RAZORPAY_KEY_ID=
+RAZORPAY_KEY_SECRET=
+```
+
+Keep `PAYMENT_MODE=mock` for demos. Switch it away from mock only after Razorpay order/payment-link creation and webhook settlement are connected.
 
 ## App Engine
 
