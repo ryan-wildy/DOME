@@ -27,7 +27,7 @@ const OEM_PLANS = {
     price: 0,
     productLimit: 3,
     headline: "Free OEM microsite",
-    features: ["Public OEM microsite", "Up to 3 products with GeM links", "Resellers can unlock contact access"]
+    features: ["Public OEM microsite", "Up to 3 products with GeM links", "Resellers can request authorization through Dome"]
   },
   domePlus: {
     id: "domePlus",
@@ -764,12 +764,26 @@ function revealedContactsForUser(db, user) {
       return {
         businessId: business.id,
         businessName: business.name,
-        phone: business.phone || "Contact phone pending",
-        email: business.email || "Contact email pending",
+        unlockedAt: item.revealedAt,
         gemUrl: business.gemUrl || "https://gem.gov.in"
       };
     })
     .filter(Boolean);
+}
+
+function authorizationRequestsForUser(db, user) {
+  return db.authorizationRequests
+    .filter((request) => request.userId === user.id || request.userEmail === user.email || request.email === user.email)
+    .map((request) => ({
+      id: request.id,
+      oemId: request.oemId,
+      oemName: request.oemName,
+      category: request.category,
+      status: request.status,
+      createdAt: request.createdAt,
+      updatedAt: request.updatedAt || request.createdAt,
+      timeline: request.timeline || []
+    }));
 }
 
 function paymentMode() {
@@ -789,7 +803,7 @@ function paymentService(service) {
   if (service === "contact_bundle") {
     return {
       service,
-      label: "OEM contact reveal bundle",
+    label: "OEM authorization request bundle",
       amount: REVEAL_BUNDLE_PRICE,
       currency: "INR",
       activates: "contactBundle"
@@ -972,6 +986,7 @@ function hasVerifiedOtp(db, target, channel, purpose = "registration") {
 
 async function api(req, res, pathname) {
   const db = await ensureDb();
+  const tokenUser = verifyToken(req);
 
   if (req.method === "GET" && pathname === "/api/bootstrap") {
     return json(res, 200, publicBootstrap(db));
@@ -1098,7 +1113,7 @@ async function api(req, res, pathname) {
     if (user.status !== "approved") return json(res, 403, { error: `Your account is ${user.status}.` });
     addAudit(db, user.email, "otp_login", channel);
     await saveDb();
-    return json(res, 200, { ok: true, token: signToken(user), user: cleanUser(user), profile: profileForUser(db, user) || null, revealedContacts: revealedContactsForUser(db, user) });
+    return json(res, 200, { ok: true, token: signToken(user), user: cleanUser(user), profile: profileForUser(db, user) || null, revealedContacts: revealedContactsForUser(db, user), authorizationRequests: authorizationRequestsForUser(db, user) });
   }
 
   if (req.method === "POST" && pathname === "/api/contact") {
@@ -1127,6 +1142,9 @@ async function api(req, res, pathname) {
   }
 
   if (req.method === "POST" && pathname === "/api/authorization") {
+    if (!tokenUser) return json(res, 401, { error: "Sign in required to request OEM authorization." });
+    const liveUser = db.users.find((user) => user.id === tokenUser.id);
+    if (!liveUser) return json(res, 401, { error: "Session user not found." });
     const payload = await readBody(req);
     const missing = required(payload, ["oemId", "vendorName", "contactName", "email", "phone", "category", "message"]);
     if (missing.length) return json(res, 422, { error: `Missing required fields: ${missing.join(", ")}` });
@@ -1134,6 +1152,8 @@ async function api(req, res, pathname) {
     if (!oem) return json(res, 404, { error: "OEM profile not found." });
     const request = {
       id: crypto.randomUUID(),
+      userId: liveUser.id,
+      userEmail: liveUser.email,
       oemId: oem.id,
       oemName: oem.name,
       vendorName: String(payload.vendorName).trim(),
@@ -1143,7 +1163,7 @@ async function api(req, res, pathname) {
       category: String(payload.category).trim(),
       message: String(payload.message).trim(),
       status: "Requested",
-      timeline: [{ stage: "Requested", at: new Date().toISOString(), by: "Vendor" }],
+      timeline: [{ stage: "Requested", at: new Date().toISOString(), by: "Reseller" }, { stage: "Dome review", at: new Date().toISOString(), by: "Dome" }],
       createdAt: new Date().toISOString()
     };
     db.authorizationRequests.unshift(request);
@@ -1248,18 +1268,17 @@ async function api(req, res, pathname) {
     return json(res, 200, { ok: true, request });
   }
 
-  const tokenUser = verifyToken(req);
   if (req.method === "GET" && pathname === "/api/me") {
     if (!tokenUser) return json(res, 401, { error: "Sign in required." });
     const liveUser = db.users.find((user) => user.id === tokenUser.id) || tokenUser;
-    return json(res, 200, { user: cleanUser(liveUser), profile: profileForUser(db, liveUser) || null, revealedContacts: revealedContactsForUser(db, liveUser) });
+    return json(res, 200, { user: cleanUser(liveUser), profile: profileForUser(db, liveUser) || null, revealedContacts: revealedContactsForUser(db, liveUser), authorizationRequests: authorizationRequestsForUser(db, liveUser) });
   }
 
   if (req.method === "GET" && pathname === "/api/profile") {
     if (!tokenUser) return json(res, 401, { error: "Sign in required." });
     const liveUser = db.users.find((user) => user.id === tokenUser.id);
     if (!liveUser) return json(res, 401, { error: "Session user not found." });
-    return json(res, 200, { user: cleanUser(liveUser), profile: profileForUser(db, liveUser) || null, revealedContacts: revealedContactsForUser(db, liveUser) });
+    return json(res, 200, { user: cleanUser(liveUser), profile: profileForUser(db, liveUser) || null, revealedContacts: revealedContactsForUser(db, liveUser), authorizationRequests: authorizationRequestsForUser(db, liveUser) });
   }
 
   if (req.method === "POST" && pathname === "/api/profile") {
@@ -1413,6 +1432,11 @@ async function api(req, res, pathname) {
         legalName: "Demo GST verified business",
         tradeName: "Dome Demo Seller",
         stateCode: gstNumber.slice(0, 2),
+        stateName: "Delhi",
+        city: "New Delhi",
+        address: "Demo Business Park, Connaught Place, New Delhi",
+        constitution: "Proprietorship",
+        natureOfBusiness: "Retail and wholesale supply",
         status: "Active",
         note: "Demo data. Connect a GST API provider before relying on this for verification."
       }
@@ -1420,7 +1444,7 @@ async function api(req, res, pathname) {
   }
 
   if (req.method === "POST" && pathname === "/api/reveal-contact") {
-    if (!tokenUser) return json(res, 401, { error: "Sign in required to reveal OEM contact information." });
+    if (!tokenUser) return json(res, 401, { error: "Sign in required to request OEM authorization." });
     const liveUser = db.users.find((user) => user.id === tokenUser.id);
     if (!liveUser) return json(res, 401, { error: "Session user not found." });
     const payload = await readBody(req);
@@ -1430,7 +1454,7 @@ async function api(req, res, pathname) {
     let bundle = db.revealBundles.find((item) => item.userId === liveUser.id && item.creditsRemaining > 0);
     if (!bundle && mode !== "mock") {
       return json(res, 402, {
-        error: `Purchase ${REVEAL_BUNDLE_CREDITS} OEM contact reveals for ${moneyText(REVEAL_BUNDLE_PRICE)} before unlocking contact details.`,
+        error: `Purchase ${REVEAL_BUNDLE_CREDITS} OEM authorization requests for ${moneyText(REVEAL_BUNDLE_PRICE)} before starting this request.`,
         paymentRequiredService: "contact_bundle",
         price: REVEAL_BUNDLE_PRICE,
         credits: REVEAL_BUNDLE_CREDITS
@@ -1449,7 +1473,7 @@ async function api(req, res, pathname) {
       db.revealBundles.unshift(bundle);
       db.payments.unshift({
         id: crypto.randomUUID(),
-        service: "Reveal OEM contact bundle",
+        service: "OEM authorization request bundle",
         payer: liveUser.businessName || liveUser.email,
         amount: REVEAL_BUNDLE_PRICE,
         status: bundle.status,
@@ -1458,7 +1482,7 @@ async function api(req, res, pathname) {
     }
     if (bundle.creditsRemaining <= 0) {
       await saveDb();
-      return json(res, 402, { error: "Payment is required before contact details can be revealed.", bundle });
+      return json(res, 402, { error: "Payment is required before starting this authorization request.", bundle });
     }
     const alreadyRevealed = db.revealPurchases.find((item) => item.userId === liveUser.id && item.businessId === business.id);
     if (!alreadyRevealed) bundle.creditsRemaining -= 1;
@@ -1470,17 +1494,17 @@ async function api(req, res, pathname) {
       revealedAt: new Date().toISOString()
     };
     if (!alreadyRevealed) db.revealPurchases.unshift(reveal);
-    addAudit(db, liveUser.email, "contact_revealed", business.name);
+    addAudit(db, liveUser.email, "authorization_form_unlocked", business.name);
     await saveDb();
     return json(res, 200, {
       ok: true,
       paymentMode: mode,
       bundle,
       reveal,
-      contact: {
+      unlock: {
+        businessId: business.id,
         businessName: business.name,
-        phone: business.phone || "Contact phone pending",
-        email: business.email || "Contact email pending",
+        unlockedAt: reveal.revealedAt,
         gemUrl: business.gemUrl || "https://gem.gov.in"
       }
     });

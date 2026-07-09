@@ -301,6 +301,19 @@ button {
   margin-bottom: 28px;
 }
 
+.section-head.compact {
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.section-head.compact h3 {
+  margin: 0;
+}
+
+.section-head.compact p {
+  margin: 4px 0 0;
+}
+
 .section-head h2,
 .page-head h1 {
   margin: 0;
@@ -540,6 +553,32 @@ button {
 
 .product-card span {
   color: var(--ink-soft);
+}
+
+.product-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.product-row-list {
+  display: grid;
+  gap: 12px;
+}
+
+.product-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1.2fr 0.9fr auto;
+  gap: 12px;
+  align-items: end;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfffd;
+}
+
+.status-card {
+  display: grid;
+  gap: 8px;
 }
 
 .inline-link {
@@ -930,7 +969,8 @@ tr:last-child td {
 
   .filters,
   .form-grid,
-  .verify-fields {
+  .verify-fields,
+  .product-row {
     grid-template-columns: 1fr;
   }
 
