@@ -16,6 +16,28 @@ const OTP_TTL_MS = 10 * 60 * 1000;
 const REVEAL_BUNDLE_PRICE = 500;
 const REVEAL_BUNDLE_CREDITS = 5;
 const PAYMENT_MODE = process.env.PAYMENT_MODE || "mock";
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || "";
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || "";
+const DOME_PLUS_PRICE = Number(process.env.DOME_PLUS_PRICE || 4999);
+const DOME_PLUS_DAYS = Number(process.env.DOME_PLUS_DAYS || 365);
+const OEM_PLANS = {
+  basic: {
+    id: "basic",
+    name: "Basic",
+    price: 0,
+    productLimit: 3,
+    headline: "Free OEM microsite",
+    features: ["Public OEM microsite", "Up to 3 products with GeM links", "Resellers can unlock contact access"]
+  },
+  domePlus: {
+    id: "domePlus",
+    name: "Dome+",
+    price: DOME_PLUS_PRICE,
+    productLimit: 10,
+    headline: "Growth microsite for active OEMs",
+    features: ["Up to 10 products with GeM links", "Priority profile presentation", "Reseller outreach tools when messaging launches"]
+  }
+};
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -362,11 +384,17 @@ async function seedDb() {
         gstNumber: "07PRINT1234F1Z8",
         ordersCompleted: 4300,
         gemLink: "https://gem.gov.in",
-        products: ["X-Range Colour Laser Cartridge", "Drum Unit DU-220", "Inkjet Cartridge IJ-310"],
+        products: [
+          { name: "X-Range Colour Laser Cartridge", gemUrl: "https://gem.gov.in" },
+          { name: "Drum Unit DU-220", gemUrl: "https://gem.gov.in" },
+          { name: "Inkjet Cartridge IJ-310", gemUrl: "https://gem.gov.in" }
+        ],
         contactList: [
           { purpose: "Reseller onboarding", name: "Channel Desk", phone: "+91 98765 41000", email: "growth@printodome.in" },
           { purpose: "Buyer enquiries", name: "Government Sales", phone: "+91 98765 41010", email: "sales@printodome.in" }
         ],
+        oemPlan: "domePlus",
+        domePlusPaidUntil: "2027-03-31",
         micrositePaidUntil: "2027-03-31",
         profileStatus: "verified"
       }
@@ -390,6 +418,7 @@ function migrateDb(db) {
   db.setupRequests ||= [];
   db.webinarRegistrations ||= [];
   db.payments ||= [];
+  db.paymentOrders ||= [];
   db.auditLog ||= [];
   db.otps ||= [];
   for (const user of db.users) {
@@ -406,6 +435,19 @@ function migrateDb(db) {
   }
   for (const app of db.applications) {
     if (app.role === "Vendor") app.role = "Reseller";
+  }
+  for (const profile of db.businessProfiles) {
+    if (profile.role === "OEM") {
+      if (profile.micrositePaidUntil && !profile.domePlusPaidUntil) profile.domePlusPaidUntil = profile.micrositePaidUntil;
+      profile.oemPlan = profile.domePlusPaidUntil ? "domePlus" : (profile.oemPlan || "basic");
+      profile.products = normalizeProducts(profile.products);
+    }
+  }
+  for (const business of db.businesses) {
+    if (business.type === "OEM") {
+      business.oemPlan ||= business.id === "printodome" ? "domePlus" : "basic";
+      business.products = normalizeProducts(business.products);
+    }
   }
   return db;
 }
@@ -443,7 +485,9 @@ function publicBootstrap(db) {
     config: {
       revealBundlePrice: REVEAL_BUNDLE_PRICE,
       revealBundleCredits: REVEAL_BUNDLE_CREDITS,
-      paymentMode: PAYMENT_MODE,
+      paymentMode: paymentMode(),
+      razorpayKeyId: RAZORPAY_KEY_ID,
+      oemPlans: OEM_PLANS,
       gstLookupMode: process.env.GST_API_URL ? "provider" : "demo"
     },
     counts: {
@@ -619,6 +663,46 @@ function initialsFor(value) {
   return words.map((word) => word[0]?.toUpperCase() || "").join("") || "D";
 }
 
+function addDays(days) {
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function todayString() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function moneyText(value) {
+  return `Rs ${Number(value || 0).toLocaleString("en-IN")}`;
+}
+
+function normalizeProducts(products) {
+  if (!Array.isArray(products)) return [];
+  return products.map((product) => {
+    if (typeof product === "string") return { name: product.trim(), gemUrl: "" };
+    return {
+      name: String(product?.name || "").trim(),
+      gemUrl: String(product?.gemUrl || product?.gemLink || "").trim(),
+      category: String(product?.category || "").trim()
+    };
+  }).filter((product) => product.name);
+}
+
+function parseProductsInput(value) {
+  if (Array.isArray(value)) return normalizeProducts(value);
+  return String(value || "")
+    .split("\n")
+    .map((line) => {
+      const [name = "", gemUrl = "", category = ""] = line.split("|").map((item) => item.trim());
+      return { name, gemUrl, category };
+    })
+    .filter((product) => product.name);
+}
+
+function oemPlanForProfile(profile) {
+  if (profile?.domePlusPaidUntil && profile.domePlusPaidUntil >= new Date().toISOString().slice(0, 10)) return OEM_PLANS.domePlus;
+  return OEM_PLANS.basic;
+}
+
 function profileCompletion(role, profile) {
   const checks = role === "OEM"
     ? ["businessName", "gstNumber", "ordersCompleted", "products", "gemLink", "contactList"]
@@ -634,7 +718,6 @@ function profileCompletion(role, profile) {
 
 function syncBusinessFromProfile(db, user, profile) {
   if (!["OEM", "Reseller"].includes(profile.role)) return;
-  if (profile.role === "OEM" && !profile.micrositePaidUntil) return;
   const id = user.businessId || slugify(profile.businessName);
   let business = db.businesses.find((item) => item.id === id);
   if (!business) {
@@ -646,7 +729,9 @@ function syncBusinessFromProfile(db, user, profile) {
   business.type = profile.role === "Reseller" ? "Vendor" : "OEM";
   business.name = profile.businessName || user.businessName;
   business.initials = initialsFor(business.name);
-  business.category = profile.role === "OEM" ? (profile.products?.[0]?.category || profile.primaryCategory || "General") : (profile.lookingForCategories?.[0] || "General");
+  const products = normalizeProducts(profile.products);
+  const plan = profile.role === "OEM" ? oemPlanForProfile(profile) : null;
+  business.category = profile.role === "OEM" ? (products[0]?.category || profile.primaryCategory || "General") : (profile.lookingForCategories?.[0] || "General");
   business.city = profile.city || business.city || "";
   business.rating = business.rating || 4.2;
   business.network = profile.role === "OEM" ? `${Number(profile.ordersCompleted || 0).toLocaleString("en-IN")} orders` : `${Number(profile.ordersCompleted || 0).toLocaleString("en-IN")} orders`;
@@ -654,11 +739,15 @@ function syncBusinessFromProfile(db, user, profile) {
   business.email = profile.contactList?.[0]?.email || user.email;
   business.gemUrl = profile.gemLink || business.gemUrl || "https://gem.gov.in";
   business.description = profile.about || `${business.name} is building its GeM growth profile on Dome.`;
-  business.products = profile.products?.map((item) => item.name || item).filter(Boolean) || business.products || [];
+  business.products = profile.role === "OEM" ? products.slice(0, plan.productLimit) : products;
+  business.productCount = products.length;
+  business.productLimit = plan?.productLimit || products.length;
+  business.oemPlan = plan?.id || "";
+  business.domePlusPaidUntil = profile.domePlusPaidUntil || "";
   business.highlights = [
     `${Number(profile.ordersCompleted || 0).toLocaleString("en-IN")} GeM orders completed`,
     profile.gstNumber ? "GST captured" : "GST pending",
-    profile.micrositePaidUntil ? "Microsite active" : "Microsite payment pending"
+    profile.role === "OEM" ? `${plan.name} microsite` : "Reseller profile"
   ];
 }
 
@@ -681,6 +770,96 @@ function revealedContactsForUser(db, user) {
       };
     })
     .filter(Boolean);
+}
+
+function paymentMode() {
+  return PAYMENT_MODE === "razorpay" && RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET ? "razorpay" : "mock";
+}
+
+function paymentService(service) {
+  if (service === "oem_dome_plus") {
+    return {
+      service,
+      label: "Dome+ OEM microsite",
+      amount: OEM_PLANS.domePlus.price,
+      currency: "INR",
+      activates: "domePlus"
+    };
+  }
+  if (service === "contact_bundle") {
+    return {
+      service,
+      label: "OEM contact reveal bundle",
+      amount: REVEAL_BUNDLE_PRICE,
+      currency: "INR",
+      activates: "contactBundle"
+    };
+  }
+  return null;
+}
+
+async function createRazorpayOrder(payment) {
+  const auth = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString("base64");
+  const response = await fetch("https://api.razorpay.com/v1/orders", {
+    method: "POST",
+    headers: {
+      authorization: `Basic ${auth}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      amount: payment.amount * 100,
+      currency: payment.currency,
+      receipt: payment.id.slice(0, 40),
+      notes: {
+        service: payment.service,
+        payer: payment.payer
+      }
+    })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error?.description || "Could not create Razorpay order.");
+  return data;
+}
+
+function verifyRazorpaySignature(orderId, paymentId, signature) {
+  const expected = crypto
+    .createHmac("sha256", RAZORPAY_KEY_SECRET)
+    .update(`${orderId}|${paymentId}`)
+    .digest("hex");
+  const received = String(signature || "");
+  if (received.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(received));
+}
+
+function activatePaidService(db, user, payment) {
+  if (payment.service === "contact_bundle") {
+    const bundle = {
+      id: crypto.randomUUID(),
+      userId: user.id,
+      creditsTotal: REVEAL_BUNDLE_CREDITS,
+      creditsRemaining: REVEAL_BUNDLE_CREDITS,
+      amount: REVEAL_BUNDLE_PRICE,
+      status: payment.status,
+      paymentId: payment.id,
+      createdAt: new Date().toISOString()
+    };
+    db.revealBundles.unshift(bundle);
+    addAudit(db, user.email, "contact_bundle_activated", `${REVEAL_BUNDLE_CREDITS} credits`);
+    return { bundle };
+  }
+  if (payment.service !== "oem_dome_plus") return null;
+  const profile = profileForUser(db, user);
+  if (!profile || profile.role !== "OEM") throw new Error("Save an OEM profile before upgrading to Dome+.");
+  profile.oemPlan = "domePlus";
+  profile.domePlusPaidUntil = addDays(DOME_PLUS_DAYS);
+  profile.micrositePaidUntil = profile.domePlusPaidUntil;
+  profile.updatedAt = new Date().toISOString();
+  syncBusinessFromProfile(db, user, profile);
+  user.role = "OEM";
+  user.businessName = profile.businessName || user.businessName;
+  user.profileComplete = profile.completion >= 80;
+  addAudit(db, user.email, "dome_plus_activated", profile.domePlusPaidUntil);
+  return profile;
 }
 
 async function sendEmailOtp(email, code) {
@@ -1090,7 +1269,8 @@ async function api(req, res, pathname) {
     const payload = await readBody(req);
     const role = payload.role === "OEM" ? "OEM" : payload.role === "Buyer" ? "Buyer" : "Reseller";
     const previousProfile = profileForUser(db, liveUser);
-    const hadMicrosite = Boolean(previousProfile?.micrositePaidUntil);
+    const previousDomePlusUntil = previousProfile?.domePlusPaidUntil || previousProfile?.micrositePaidUntil || "";
+    const products = parseProductsInput(payload.products);
     const profile = {
       ...(previousProfile || {}),
       id: previousProfile?.id || crypto.randomUUID(),
@@ -1106,15 +1286,16 @@ async function api(req, res, pathname) {
       gemLink: String(payload.gemLink || "").trim(),
       ordersCompleted: Number(payload.ordersCompleted || 0),
       lookingForCategories: Array.isArray(payload.lookingForCategories) ? payload.lookingForCategories : String(payload.lookingForCategories || "").split(",").map((item) => item.trim()).filter(Boolean),
-      products: Array.isArray(payload.products) ? payload.products : String(payload.products || "").split("\n").map((name) => ({ name: name.trim() })).filter((item) => item.name),
+      products,
       contactList: Array.isArray(payload.contactList) ? payload.contactList : String(payload.contactList || "").split("\n").map((line) => {
         const [purpose = "", name = "", phone = "", email = ""] = line.split("|").map((item) => item.trim());
         return { purpose, name, phone, email };
       }).filter((item) => item.purpose || item.name || item.phone || item.email),
       about: String(payload.about || "").trim(),
       gstLookup: payload.gstLookup || null,
-      micrositeRequested: Boolean(payload.micrositeRequested),
-      micrositePaidUntil: payload.micrositePaidUntil || (payload.micrositeRequested && PAYMENT_MODE === "mock" ? "2027-03-31" : ""),
+      oemPlan: role === "OEM" && previousDomePlusUntil >= todayString() ? "domePlus" : "basic",
+      domePlusPaidUntil: role === "OEM" ? previousDomePlusUntil : "",
+      micrositePaidUntil: role === "OEM" ? previousDomePlusUntil : "",
       updatedAt: new Date().toISOString()
     };
     profile.completion = profileCompletion(role, profile);
@@ -1125,20 +1306,92 @@ async function api(req, res, pathname) {
     liveUser.role = role;
     liveUser.businessName = profile.businessName || liveUser.businessName;
     liveUser.profileComplete = profile.completion >= 80;
-    if (role === "OEM" && profile.micrositeRequested && !hadMicrosite) {
-      db.payments.unshift({
-        id: crypto.randomUUID(),
-        service: "OEM microsite activation",
-        payer: profile.businessName || liveUser.email,
-        amount: 4999,
-        status: PAYMENT_MODE === "mock" ? "paid_mock" : "provider_pending",
-        createdAt: new Date().toISOString()
-      });
-    }
     syncBusinessFromProfile(db, liveUser, profile);
     addAudit(db, liveUser.email, "profile_saved", `${role} profile ${profile.completion}%`);
     await saveDb();
     return json(res, 200, { ok: true, user: cleanUser(liveUser), profile });
+  }
+
+  if (req.method === "POST" && pathname === "/api/payments/start") {
+    if (!tokenUser) return json(res, 401, { error: "Sign in required." });
+    const liveUser = db.users.find((user) => user.id === tokenUser.id);
+    if (!liveUser) return json(res, 401, { error: "Session user not found." });
+    const payload = await readBody(req);
+    const service = paymentService(payload.service);
+    if (!service) return json(res, 422, { error: "Payment service not found." });
+    if (service.service === "oem_dome_plus") {
+      const profile = profileForUser(db, liveUser);
+      if (!profile || profile.role !== "OEM") return json(res, 422, { error: "Save an OEM profile before upgrading to Dome+." });
+    }
+
+    const mode = paymentMode();
+    const payment = {
+      id: crypto.randomUUID(),
+      userId: liveUser.id,
+      userEmail: liveUser.email,
+      service: service.service,
+      label: service.label,
+      payer: liveUser.businessName || liveUser.email,
+      amount: service.amount,
+      currency: service.currency,
+      provider: mode,
+      status: mode === "mock" ? "paid_mock" : "created",
+      createdAt: new Date().toISOString()
+    };
+
+    let activation = null;
+    let checkout = null;
+    if (mode === "mock") {
+      activation = activatePaidService(db, liveUser, payment);
+      payment.paidAt = new Date().toISOString();
+    } else {
+      const order = await createRazorpayOrder(payment);
+      payment.providerOrderId = order.id;
+      checkout = {
+        key: RAZORPAY_KEY_ID,
+        orderId: order.id,
+        amount: order.amount,
+        currency: order.currency,
+        name: "Dome by PrintoDome",
+        description: service.label,
+        prefill: {
+          name: liveUser.businessName || "",
+          email: liveUser.email,
+          contact: liveUser.phone || ""
+        }
+      };
+    }
+
+    db.payments.unshift(payment);
+    addAudit(db, liveUser.email, mode === "mock" ? "mock_payment_completed" : "payment_order_created", service.label);
+    await saveDb();
+    return json(res, 200, { ok: true, mode, payment, checkout, user: cleanUser(liveUser), profile: profileForUser(db, liveUser) || null, activation });
+  }
+
+  if (req.method === "POST" && pathname === "/api/payments/verify") {
+    if (!tokenUser) return json(res, 401, { error: "Sign in required." });
+    const liveUser = db.users.find((user) => user.id === tokenUser.id);
+    if (!liveUser) return json(res, 401, { error: "Session user not found." });
+    const payload = await readBody(req);
+    const payment = db.payments.find((item) => item.id === payload.paymentId && item.userId === liveUser.id);
+    if (!payment) return json(res, 404, { error: "Payment not found." });
+    if (payment.status === "paid" || payment.status === "paid_mock") return json(res, 200, { ok: true, payment, user: cleanUser(liveUser), profile: profileForUser(db, liveUser) || null });
+    if (payment.provider !== "razorpay") return json(res, 422, { error: "This payment does not need Razorpay verification." });
+    const orderId = String(payload.razorpay_order_id || "");
+    const paymentId = String(payload.razorpay_payment_id || "");
+    const signature = String(payload.razorpay_signature || "");
+    if (orderId !== payment.providerOrderId || !verifyRazorpaySignature(orderId, paymentId, signature)) {
+      payment.status = "verification_failed";
+      await saveDb();
+      return json(res, 422, { error: "Payment verification failed." });
+    }
+    payment.status = "paid";
+    payment.providerPaymentId = paymentId;
+    payment.paidAt = new Date().toISOString();
+    const activation = activatePaidService(db, liveUser, payment);
+    addAudit(db, liveUser.email, "payment_verified", payment.label);
+    await saveDb();
+    return json(res, 200, { ok: true, payment, user: cleanUser(liveUser), profile: profileForUser(db, liveUser) || null, activation });
   }
 
   if (req.method === "POST" && pathname === "/api/gst/lookup") {
@@ -1173,15 +1426,24 @@ async function api(req, res, pathname) {
     const payload = await readBody(req);
     const business = db.businesses.find((item) => item.id === payload.businessId && item.type === "OEM");
     if (!business) return json(res, 404, { error: "OEM profile not found." });
+    const mode = paymentMode();
     let bundle = db.revealBundles.find((item) => item.userId === liveUser.id && item.creditsRemaining > 0);
+    if (!bundle && mode !== "mock") {
+      return json(res, 402, {
+        error: `Purchase ${REVEAL_BUNDLE_CREDITS} OEM contact reveals for ${moneyText(REVEAL_BUNDLE_PRICE)} before unlocking contact details.`,
+        paymentRequiredService: "contact_bundle",
+        price: REVEAL_BUNDLE_PRICE,
+        credits: REVEAL_BUNDLE_CREDITS
+      });
+    }
     if (!bundle) {
       bundle = {
         id: crypto.randomUUID(),
         userId: liveUser.id,
         creditsTotal: REVEAL_BUNDLE_CREDITS,
-        creditsRemaining: PAYMENT_MODE === "mock" ? REVEAL_BUNDLE_CREDITS : 0,
+        creditsRemaining: mode === "mock" ? REVEAL_BUNDLE_CREDITS : 0,
         amount: REVEAL_BUNDLE_PRICE,
-        status: PAYMENT_MODE === "mock" ? "paid_mock" : "provider_pending",
+        status: mode === "mock" ? "paid_mock" : "provider_pending",
         createdAt: new Date().toISOString()
       };
       db.revealBundles.unshift(bundle);
@@ -1212,7 +1474,7 @@ async function api(req, res, pathname) {
     await saveDb();
     return json(res, 200, {
       ok: true,
-      paymentMode: PAYMENT_MODE,
+      paymentMode: mode,
       bundle,
       reveal,
       contact: {

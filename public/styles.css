@@ -170,6 +170,18 @@ button {
   font-size: 0.88rem;
 }
 
+.link-button {
+  width: fit-content;
+  border: 0;
+  background: transparent;
+  color: var(--green-dark);
+  padding: 0;
+  margin-top: 4px;
+  font-weight: 850;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .hero {
   min-height: calc(100vh - 76px);
   display: flex;
@@ -502,6 +514,95 @@ button {
 .notice.success {
   border-left-color: var(--green);
   background: #ecf8f2;
+}
+
+.plan-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.product-card {
+  display: grid;
+  gap: 7px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--green);
+  border-radius: var(--radius);
+  background: #f9fdfb;
+}
+
+.product-card strong {
+  color: var(--ink);
+}
+
+.product-card span {
+  color: var(--ink-soft);
+}
+
+.inline-link {
+  width: fit-content;
+  color: var(--green-dark);
+  font-weight: 850;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.plan-card,
+.plan-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.plan-card {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--mist);
+}
+
+.plan-card.featured,
+.plan-option.featured {
+  border-color: #94cdb6;
+  background: #f2fbf6;
+}
+
+.price-line {
+  font-size: 1.15rem;
+  color: var(--green-dark);
+}
+
+.plan-head h2 {
+  margin-bottom: 6px;
+}
+
+.plan-options {
+  display: grid;
+  gap: 12px;
+}
+
+.plan-option {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--white);
+}
+
+.plan-option.active {
+  box-shadow: inset 4px 0 0 var(--green);
+}
+
+.plan-option strong,
+.plan-option span {
+  display: block;
+}
+
+.plan-option span {
+  margin-top: 3px;
+  color: var(--green-dark);
+  font-weight: 850;
 }
 
 .profile-message {

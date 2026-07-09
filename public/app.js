@@ -19,14 +19,107 @@ const app = document.querySelector("#app");
 
 const money = (value) => `Rs ${Number(value || 0).toLocaleString("en-IN")}`;
 const today = () => new Date().toISOString().slice(0, 10);
+const oemPlans = () => state.boot?.config?.oemPlans || {};
+
+function productName(product) {
+  return typeof product === "string" ? product : product?.name || "";
+}
+
+function productGemUrl(product) {
+  return typeof product === "string" ? "" : product?.gemUrl || product?.gemLink || "";
+}
+
+function productInputValue(products = []) {
+  return products.map((product) => {
+    const name = productName(product);
+    const gemUrl = productGemUrl(product);
+    return [name, gemUrl].filter(Boolean).join(" | ");
+  }).join("\n");
+}
+
+function currentOemPlan(entity = {}) {
+  const plans = oemPlans();
+  return entity.oemPlan === "domePlus" || (entity.domePlusPaidUntil && entity.domePlusPaidUntil >= today())
+    ? plans.domePlus
+    : plans.basic;
+}
+
+function displayType(type) {
+  return type === "Vendor" ? "Reseller" : type;
+}
+
+function gstStateName(code) {
+  return ({
+    "01": "Jammu and Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh", "05": "Uttarakhand",
+    "06": "Haryana", "07": "Delhi", "08": "Rajasthan", "09": "Uttar Pradesh", "10": "Bihar",
+    "19": "West Bengal", "21": "Odisha", "22": "Chhattisgarh", "23": "Madhya Pradesh", "24": "Gujarat",
+    "27": "Maharashtra", "29": "Karnataka", "32": "Kerala", "33": "Tamil Nadu", "36": "Telangana",
+    "37": "Andhra Pradesh"
+  })[String(code || "").padStart(2, "0")] || "";
+}
 
 async function api(path, options = {}) {
   const headers = { "content-type": "application/json", ...(options.headers || {}) };
   if (state.token) headers.authorization = `Bearer ${state.token}`;
   const response = await fetch(path, { ...options, headers });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || "Request failed");
+  if (!response.ok) {
+    const error = new Error(data.error || "Request failed");
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
   return data;
+}
+
+function loadRazorpayCheckout() {
+  if (window.Razorpay) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
+    if (existing) {
+      existing.addEventListener("load", resolve, { once: true });
+      existing.addEventListener("error", reject, { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.onload = resolve;
+    script.onerror = () => reject(new Error("Could not load Razorpay Checkout."));
+    document.head.appendChild(script);
+  });
+}
+
+async function performPayment(service) {
+  const result = await api("/api/payments/start", { method: "POST", body: JSON.stringify({ service }) });
+  if (result.mode === "mock") return result;
+  await loadRazorpayCheckout();
+  const checkout = result.checkout;
+  return new Promise((resolve, reject) => {
+    const razorpay = new Razorpay({
+      key: checkout.key,
+      amount: checkout.amount,
+      currency: checkout.currency,
+      name: checkout.name,
+      description: checkout.description,
+      order_id: checkout.orderId,
+      prefill: checkout.prefill,
+      theme: { color: "#0d6b58" },
+      handler: async (response) => {
+        try {
+          resolve(await api("/api/payments/verify", {
+            method: "POST",
+            body: JSON.stringify({ paymentId: result.payment.id, ...response })
+          }));
+        } catch (error) {
+          reject(error);
+        }
+      },
+      modal: {
+        ondismiss: () => reject(new Error("Payment was not completed."))
+      }
+    });
+    razorpay.open();
+  });
 }
 
 function setRoute(route) {
@@ -130,7 +223,7 @@ function businessCard(item) {
       <div class="avatar">${escapeHtml(item.initials)}</div>
       <h3>${escapeHtml(item.name)}</h3>
       <div class="tags">
-        <span class="tag">${escapeHtml(item.type)}</span>
+        <span class="tag">${escapeHtml(displayType(item.type))}</span>
         <span class="tag">${escapeHtml(item.category)}</span>
         ${item.badge ? `<span class="tag dark">${escapeHtml(item.badge)}</span>` : ""}
       </div>
@@ -301,6 +394,9 @@ function profilePage(id) {
   const isOem = business.type === "OEM";
   const canCall = state.user && state.user.businessId !== business.id && business.callingActiveUntil && business.callingActiveUntil >= today();
   const revealed = state.revealedContacts[business.id];
+  const plan = isOem ? currentOemPlan(business) : null;
+  const productLimit = plan?.productLimit || business.productLimit || (business.products || []).length;
+  const totalProducts = business.productCount || (business.products || []).length;
   const authorized = (business.authorizedOems || []).map((oemId) => state.boot.businesses.find((item) => item.id === oemId)).filter(Boolean);
 
   return shell(`
@@ -308,7 +404,7 @@ function profilePage(id) {
       <section class="profile-hero">
         <div class="profile-hero-inner">
           <div>
-            <p class="eyebrow">${business.type} profile</p>
+            <p class="eyebrow">${escapeHtml(displayType(business.type))} profile</p>
             <h1>${escapeHtml(business.name)}</h1>
             <div class="tags">
               <span class="tag">${escapeHtml(business.category)}</span>
@@ -322,7 +418,7 @@ function profilePage(id) {
               ${isOem && !revealed && state.user ? `<button class="button secondary" data-action="reveal-contact" data-business-id="${business.id}">Unlock contact - ${money(state.boot.config.revealBundlePrice)} / ${state.boot.config.revealBundleCredits} OEMs</button>` : ""}
               ${isOem && !revealed && !state.user ? `<a class="button secondary" href="#/login">Log in to unlock contact</a><a class="button ghost" href="#/register">Join Dome</a>` : ""}
               ${!isOem ? `<a class="button secondary" href="#/contact/${business.id}">Send enquiry</a>` : ""}
-              ${canCall ? `<a class="button warn" href="tel:${escapeHtml(business.phone || "")}">Call ${escapeHtml(business.name)}</a>` : `<span class="tag">Direct call ${business.callingActiveUntil ? "after sign-in" : "not active"}</span>`}
+              ${canCall ? `<a class="button warn" href="tel:${escapeHtml(business.phone || "")}">Call ${escapeHtml(business.name)}</a>` : ""}
             </div>
             <div id="revealNotice" class="profile-message">
               ${isOem && !revealed ? `<p class="notice warn">${state.user ? "Contact details and authorization requests unlock after purchasing a contact bundle." : "Please log in or register before unlocking OEM contact information."}</p>` : ""}
@@ -336,17 +432,38 @@ function profilePage(id) {
         <div class="container split">
           <div class="grid">
             <article class="card">
-              <h2>${isOem ? "Products and GeM performance" : "Authorized OEMs"}</h2>
+              <h2>${isOem ? "Products on this microsite" : "Authorized OEMs"}</h2>
               ${isOem ? `
-                <div class="grid two">${(business.products || []).map((product) => `<div class="notice"><strong>${escapeHtml(product)}</strong><br><span class="muted">${escapeHtml(business.category)} catalogue item.</span></div>`).join("")}</div>
+                <div class="plan-strip">
+                  <span class="tag dark">${escapeHtml(plan?.name || "Basic")} microsite</span>
+                  <span class="muted">${Math.min(totalProducts, productLimit)} of ${productLimit} product slots visible${totalProducts > productLimit ? ` (${totalProducts - productLimit} saved for Dome+)` : ""}</span>
+                </div>
+                <div class="grid two">${(business.products || []).slice(0, productLimit).map((product) => `
+                  <div class="product-card">
+                    <strong>${escapeHtml(productName(product))}</strong>
+                    <span>${escapeHtml(business.category)} catalogue item</span>
+                    ${productGemUrl(product) ? `<a class="inline-link" href="${escapeHtml(productGemUrl(product))}" target="_blank" rel="noreferrer">Open GeM listing</a>` : `<span class="muted">GeM link can be added by the OEM</span>`}
+                  </div>
+                `).join("")}</div>
               ` : authorized.length ? `
                 <div class="grid two">${authorized.map((oem) => `<a class="notice" href="#/profile/${oem.id}"><strong>${escapeHtml(oem.name)}</strong><br><span class="muted">${escapeHtml(oem.category)} - GeM profile</span></a>`).join("")}</div>
               ` : `<div class="empty">No active OEM partnerships are visible yet.</div>`}
             </article>
             <article class="card">
-              <h2>Sales enablement</h2>
-              <p class="notice">Sales kits are available to authorized resellers.</p>
-              <div class="tags">${(business.kits || ["Brochures", "Rate list", "Bid samples"]).map((kit) => `<span class="tag">${escapeHtml(kit)}</span>`).join("")}</div>
+              <h2>${isOem ? "OEM plan" : "Sales enablement"}</h2>
+              ${isOem ? `
+                <div class="plan-card ${plan?.id === "domePlus" ? "featured" : ""}">
+                  <div>
+                    <span class="tag">${escapeHtml(plan?.name || "Basic")}</span>
+                    <h3>${escapeHtml(plan?.headline || "OEM microsite")}</h3>
+                    <p>${plan?.id === "domePlus" ? "This OEM can publish a larger catalogue and is ready for deeper reseller discovery." : "Basic keeps the OEM discoverable with a focused catalogue. Dome+ expands product slots and reseller growth tools."}</p>
+                  </div>
+                  ${plan?.id === "domePlus" ? `<strong class="price-line">Active</strong>` : `<strong class="price-line">${money(oemPlans().domePlus?.price || 4999)} / year</strong>`}
+                </div>
+              ` : `
+                <p class="notice">Sales kits are available to authorized resellers.</p>
+                <div class="tags">${(business.kits || ["Brochures", "Rate list", "Bid samples"]).map((kit) => `<span class="tag">${escapeHtml(kit)}</span>`).join("")}</div>
+              `}
             </article>
           </div>
           <aside class="grid">
@@ -507,16 +624,14 @@ function loginPage() {
       <div class="container split">
         <form class="card" id="loginForm">
           <div id="formNotice"></div>
-          <div class="segmented">
-            <button class="${isPhone ? "active" : ""}" type="button" data-login-mode="phone">Phone</button>
-            <button class="${!isPhone ? "active" : ""}" type="button" data-login-mode="email">Email backup</button>
-          </div>
           ${isPhone ? `
             <label><span class="label">Mobile number</span><input class="input" name="loginPhone" placeholder="+919000000001" required></label>
             <label><span class="label">Code</span><input class="input" name="loginPhoneOtp" inputmode="numeric" placeholder="6-digit code"></label>
+            <button class="link-button" type="button" data-login-mode="email">Log in another way</button>
           ` : `
             <label><span class="label">Email</span><input class="input" name="loginEmail" type="email" required placeholder="vendor@dome.com"></label>
             <label><span class="label">Code</span><input class="input" name="loginEmailOtp" inputmode="numeric" placeholder="6-digit code"></label>
+            <button class="link-button" type="button" data-login-mode="phone">Use mobile number</button>
           `}
           <div class="form-actions">
             <button class="button secondary" type="button" data-action="send-login-code" data-channel="${isPhone ? "phone" : "email"}">Send code</button>
@@ -554,7 +669,7 @@ function dashboardPage() {
     ["Setup requests", "Fulfil paid admin-assisted setup", "#/admin"],
     ["Audit trail", "Track platform decisions", "#/admin"]
   ] : isOem ? [
-    ["Complete profile", "GST, products, contacts and paid microsite", "#/profile-setup"],
+    ["Complete profile", "GST, products, contacts and microsite plan", "#/profile-setup"],
     ["Reseller discovery", "Find capable resellers", "#/directory"],
     ["Authorization requests", "Review and advance partner requests", "#/admin"],
     ["Sales kits", "Share brochures, pricing and sales material", "#/learn"]
@@ -592,6 +707,11 @@ function dashboardPage() {
 function profileSetupPage() {
   if (!state.user) return loginPage();
   const role = state.profile?.role || (state.user.role === "OEM" ? "OEM" : state.user.role === "Buyer" ? "Buyer" : "Reseller");
+  const isOem = role === "OEM";
+  const plan = isOem ? currentOemPlan(state.profile || {}) : null;
+  const plans = oemPlans();
+  const savedProducts = state.profile?.products || [];
+  const productLimit = plan?.productLimit || plans.basic?.productLimit || 3;
   return shell(`
     <main class="page">
       <header class="page-head">
@@ -618,9 +738,8 @@ function profileSetupPage() {
             ` : ""}
             ${role === "OEM" ? `
               <label><span class="label">GeM listing/profile link</span><input class="input" name="gemLink" type="url" value="${escapeHtml(state.profile?.gemLink || "")}"></label>
-              <label class="full"><span class="label">Products</span><textarea class="textarea" name="products" placeholder="One product per line">${escapeHtml((state.profile?.products || []).map((item) => item.name || item).join("\n"))}</textarea></label>
+              <label class="full"><span class="label">Products with GeM links</span><textarea class="textarea" name="products" placeholder="Product name | https://gem.gov.in/listing">${escapeHtml(productInputValue(savedProducts))}</textarea></label>
               <label class="full"><span class="label">Contact list</span><textarea class="textarea" name="contactList" placeholder="Purpose | Name | Phone | Email">${escapeHtml((state.profile?.contactList || []).map((item) => [item.purpose, item.name, item.phone, item.email].filter(Boolean).join(" | ")).join("\n"))}</textarea></label>
-              <label class="full"><input type="checkbox" name="micrositeRequested" ${state.profile?.micrositeRequested ? "checked" : ""}> Activate OEM microsite as a paid feature</label>
             ` : ""}
             <label class="full"><span class="label">About the business</span><textarea class="textarea" name="about">${escapeHtml(state.profile?.about || "")}</textarea></label>
           </div>
@@ -639,10 +758,28 @@ function profileSetupPage() {
             <p>Use GST details to pre-fill and confirm business information before review.</p>
             ${state.gstLookup ? `<p class="notice success"><strong>${escapeHtml(state.gstLookup.result.tradeName || state.gstLookup.result.legalName)}</strong><br>${escapeHtml(state.gstLookup.result.status)} business record found</p>` : ""}
           </div>
-          <div class="card">
-            <h2>Paid OEM microsite</h2>
-            <p>For OEMs, saved profile data becomes the content source for their public microsite. Activation is recorded as a paid feature.</p>
-          </div>
+          ${isOem ? `
+            <div class="card plan-panel">
+              <div class="plan-head">
+                <span class="tag dark">${escapeHtml(plan?.name || "Basic")}</span>
+                <h2>OEM microsite plan</h2>
+                <p>${escapeHtml(savedProducts.length)} products saved. ${Math.min(savedProducts.length, productLimit)} can show publicly on your current plan.</p>
+              </div>
+              <div class="plan-options">
+                <div class="plan-option ${plan?.id === "basic" ? "active" : ""}">
+                  <strong>Basic</strong>
+                  <span>Free forever</span>
+                  <p>Public microsite with up to ${plans.basic?.productLimit || 3} products and GeM links.</p>
+                </div>
+                <div class="plan-option ${plan?.id === "domePlus" ? "active featured" : "featured"}">
+                  <strong>Dome+</strong>
+                  <span>${money(plans.domePlus?.price || 4999)} / year</span>
+                  <p>Up to ${plans.domePlus?.productLimit || 10} products, stronger profile presentation and reseller outreach tools as they launch.</p>
+                </div>
+              </div>
+              ${plan?.id === "domePlus" ? `<p class="notice success">Dome+ active until ${escapeHtml(state.profile?.domePlusPaidUntil || state.profile?.micrositePaidUntil || "next renewal")}.</p>` : `<button class="button" type="button" data-action="upgrade-oem-plan">Upgrade to Dome+</button>`}
+            </div>
+          ` : ""}
         </aside>
       </div>
     </main>
@@ -999,7 +1136,24 @@ async function handleClick(event) {
     try {
       const payload = formPayload(form);
       state.gstLookup = await api("/api/gst/lookup", { method: "POST", body: JSON.stringify({ gstNumber: payload.gstNumber }) });
+      const result = state.gstLookup.result || {};
+      const businessNameInput = form.elements.businessName;
+      const stateInput = form.elements.state;
+      if (businessNameInput && !businessNameInput.value && (result.tradeName || result.legalName)) businessNameInput.value = result.tradeName || result.legalName;
+      if (stateInput && !stateInput.value && result.stateCode) stateInput.value = gstStateName(result.stateCode) || result.stateCode;
       notice(`GST lookup ready: ${state.gstLookup.result.tradeName || state.gstLookup.result.legalName}.`);
+    } catch (error) {
+      notice(error.message, "error");
+    }
+  }
+  if (action === "upgrade-oem-plan") {
+    try {
+      const result = await performPayment("oem_dome_plus");
+      state.user = result.user;
+      state.profile = result.profile;
+      localStorage.setItem("domeUser", JSON.stringify(result.user));
+      render();
+      notice(result.mode === "mock" ? `Dome+ activated in mock payment mode. ${money(result.payment.amount)} recorded.` : "Dome+ payment verified and plan activated.");
     } catch (error) {
       notice(error.message, "error");
     }
@@ -1017,6 +1171,19 @@ async function handleClick(event) {
       if (target) target.innerHTML = `<p class="notice success"><strong>${escapeHtml(result.contact.businessName)} unlocked.</strong><br>Phone: ${escapeHtml(result.contact.phone)}<br>Email: ${escapeHtml(result.contact.email)}<br>${result.bundle.creditsRemaining} reveal credits remaining. You can now request authorization.</p>`;
       render();
     } catch (error) {
+      if (error.status === 402 && error.data?.paymentRequiredService) {
+        try {
+          const payment = await performPayment(error.data.paymentRequiredService);
+          const result = await api("/api/reveal-contact", { method: "POST", body: JSON.stringify({ businessId }) });
+          state.revealedContacts[businessId] = result.contact;
+          if (target) target.innerHTML = `<p class="notice success"><strong>${escapeHtml(result.contact.businessName)} unlocked.</strong><br>Payment recorded: ${money(payment.payment.amount)}.<br>Phone: ${escapeHtml(result.contact.phone)}<br>Email: ${escapeHtml(result.contact.email)}<br>${result.bundle.creditsRemaining} reveal credits remaining. You can now request authorization.</p>`;
+          render();
+          return;
+        } catch (paymentError) {
+          if (target) target.innerHTML = `<p class="notice error">${escapeHtml(paymentError.message)}</p>`;
+          return;
+        }
+      }
       if (target) target.innerHTML = `<p class="notice error">${escapeHtml(error.message)}</p>`;
     }
   }
