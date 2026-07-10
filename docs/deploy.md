@@ -49,8 +49,8 @@ For the India launch workflow, this build is prepared for:
 
 - Phone OTP: MSG91 first choice for India/DLT workflows, Twilio as fallback.
 - Email OTP: Resend for quick setup, SendGrid as fallback.
-- Payments: Razorpay for the Rs 500 contact reveal bundle and paid OEM microsites.
-- GST lookup: connect a GST/GSP provider behind `GST_API_URL`; the current demo mode returns clearly marked sample data.
+- Payments: Razorpay for the Rs 500 / 5 OEM authorization-request bundle and paid OEM microsites.
+- GST lookup: connect a GST/GSP provider behind `GST_API_URL`; Dome maps common legal name, trade name, status, constitution, registration date, business nature and principal-address fields when the provider returns them. GST search data usually does not include a public contact person, so that field remains member-entered unless the provider explicitly supplies an authorized signatory.
 
 Supported environment variables:
 
@@ -77,7 +77,7 @@ RAZORPAY_KEY_ID=
 RAZORPAY_KEY_SECRET=
 ```
 
-Keep `PAYMENT_MODE=mock` for demos. Switch it away from mock only after Razorpay order/payment-link creation and webhook settlement are connected.
+Keep `PAYMENT_MODE=mock` for demos. Set it to `razorpay` only after the Razorpay keys are configured and the full payment settlement process has been tested.
 
 ## App Engine
 

@@ -12,7 +12,17 @@ const state = {
   gstLookup: null,
   gstLookupTarget: "",
   loginMode: "phone",
-  identity: { phoneVerified: false, emailVerified: false },
+  identity: {
+    phone: "",
+    email: "",
+    phoneOtp: "",
+    emailOtp: "",
+    phoneCodeSent: false,
+    emailCodeSent: false,
+    phoneVerified: false,
+    emailVerified: false
+  },
+  loginIdentity: { phone: "", email: "", phoneOtp: "", emailOtp: "", phoneCodeSent: false, emailCodeSent: false },
   revealedContacts: {},
   authorizationRequests: [],
   productDraftRows: null
@@ -79,25 +89,69 @@ function gstStateName(code) {
   })[String(code || "").padStart(2, "0")] || "";
 }
 
+function gstKey(value) {
+  return String(value || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function formatGstValue(value) {
+  if (Array.isArray(value)) return value.map(formatGstValue).filter(Boolean).join(", ");
+  if (value && typeof value === "object") {
+    const addressKeys = ["flno", "bno", "bnm", "st", "loc", "city", "dst", "stcd", "pncd"];
+    const parts = addressKeys.map((key) => value[key]).filter(Boolean);
+    if (parts.length) return [...new Set(parts.map(String))].join(", ");
+    return "";
+  }
+  return String(value || "").trim();
+}
+
 function pickGstValue(result, keys) {
-  for (const key of keys) {
-    const value = result?.[key];
-    if (value) return value;
+  for (const requestedKey of keys) {
+    const wanted = gstKey(requestedKey);
+    let found = "";
+    function visit(value) {
+      if (found || !value || typeof value !== "object") return;
+      for (const [key, child] of Object.entries(value)) {
+        if (gstKey(key) === wanted) {
+          const formatted = formatGstValue(child);
+          if (formatted) {
+            found = formatted;
+            return;
+          }
+        }
+        visit(child);
+        if (found) return;
+      }
+    }
+    visit(result);
+    if (found) return found;
   }
   return "";
 }
 
 function applyGstLookupToForm(form, result) {
-  const businessName = pickGstValue(result, ["tradeName", "tradeNam", "legalName", "lgnm", "businessName"]);
-  const state = pickGstValue(result, ["stateName", "state", "pradrState"]) || gstStateName(result.stateCode || result.stcd);
-  const city = pickGstValue(result, ["city", "district", "dst", "pradrCity"]);
+  const tradeName = pickGstValue(result, ["tradeName", "tradeNam", "trade_name", "businessName"]);
+  const legalName = pickGstValue(result, ["legalName", "legalNam", "lgnm"]);
+  const businessName = tradeName || legalName;
+  const stateCode = pickGstValue(result, ["stateCode", "stcd"]);
+  const gstState = pickGstValue(result, ["stateName", "state", "pradrState", "stcd"]) || gstStateName(stateCode);
+  const city = pickGstValue(result, ["city", "district", "dst", "pradrCity", "loc"]);
   const address = pickGstValue(result, ["address", "principalPlace", "pradrAdr", "addr"]);
   const nature = pickGstValue(result, ["natureOfBusiness", "nba", "businessNature"]);
+  const constitution = pickGstValue(result, ["constitution", "constitutionOfBusiness", "ctb"]);
+  const status = pickGstValue(result, ["status", "gstStatus", "sts"]);
+  const contactPerson = pickGstValue(result, ["contactPerson", "authorizedSignatory", "authorisedSignatory", "proprietorName"]);
   if (form.elements.businessName && businessName) form.elements.businessName.value = businessName;
-  if (form.elements.state && state) form.elements.state.value = state;
+  if (form.elements.state && gstState) form.elements.state.value = gstState;
   if (form.elements.city && city) form.elements.city.value = city;
-  if (form.elements.about && !form.elements.about.value && (address || nature)) {
-    form.elements.about.value = [nature, address].filter(Boolean).join(". ");
+  if (form.elements.contactPerson && contactPerson && !form.elements.contactPerson.value) form.elements.contactPerson.value = contactPerson;
+  if (form.elements.about && !form.elements.about.value && (businessName || address || nature)) {
+    const identity = [constitution, nature ? `engaged in ${nature}` : ""].filter(Boolean).join(" business ");
+    const location = [city, gstState].filter(Boolean).join(", ");
+    form.elements.about.value = [
+      `${businessName || "The organization"} is a ${identity || "GST-registered business"}${location ? ` based in ${location}` : ""}.`,
+      address ? `Registered business address: ${address}.` : "",
+      status ? `GST status: ${status}.` : ""
+    ].filter(Boolean).join(" ");
   }
 }
 
@@ -201,7 +255,7 @@ function shell(content) {
           </a>
           <div class="nav-links">
             ${navLink("/", "Home")}
-            ${navLink("/about", "About GeM")}
+            ${navLink("/about", "About Dome")}
             ${navLink("/directory", "OEMs/Resellers")}
             ${navLink("/learn", "Learn")}
             ${navLink("/webinars", "Webinars")}
@@ -215,7 +269,7 @@ function shell(content) {
         </nav>
         <div class="mobile-panel ${state.menuOpen ? "open" : ""}">
           ${navLink("/", "Home")}
-          ${navLink("/about", "About GeM")}
+          ${navLink("/about", "About Dome")}
           ${navLink("/directory", "OEMs/Resellers")}
           ${navLink("/learn", "Learn")}
           ${navLink("/webinars", "Webinars")}
@@ -235,11 +289,11 @@ function footer() {
       <div class="footer-inner">
         <div>
           <div class="brand"><span class="brand-mark">D</span><span>Dome <small>by PrintoDome</small></span></div>
-          <p>The GeM growth community. Learn it, connect both ways, grow together, while all official GeM actions stay on the real GeM portal.</p>
+          <p>The growth platform for businesses building serious OEM, reseller and buyer relationships around GeM.</p>
         </div>
         <div>
           <strong>Community</strong>
-          <a href="#/about">About GeM</a>
+          <a href="#/about">About Dome</a>
           <a href="#/learn">Learn hub</a>
           <a href="#/webinars">Webinars</a>
         </div>
@@ -251,7 +305,7 @@ function footer() {
         </div>
         <div>
           <strong>Dome</strong>
-          <a href="#/admin">Member review</a>
+          <a href="#/dashboard">Member dashboard</a>
           <a href="#/register">Verified signup</a>
           <a href="#/about">How it works</a>
         </div>
@@ -286,9 +340,9 @@ function homePage() {
     <main>
       <section class="hero">
         <div class="hero-inner">
-          <p class="eyebrow">The GeM growth community</p>
-          <h1>Where OEMs, resellers and buyers grow beside GeM.</h1>
-          <p>Dome helps businesses understand GeM, build OEM-Reseller relationships, share sales kits, and get discovered. Dome keeps the business journey organized around GeM.</p>
+          <p class="eyebrow">The business network built for GeM growth</p>
+          <h1>Build the partnerships behind every GeM opportunity.</h1>
+          <p>Dome brings OEMs, resellers and buyers into one trusted network for discovery, authorization, product visibility and channel growth.</p>
           <div class="hero-actions">
             <a class="button" href="#/register">Join Dome</a>
             <a class="button secondary" href="#/directory">Explore OEMs/Resellers</a>
@@ -297,7 +351,7 @@ function homePage() {
             <div class="hero-stat"><strong>23 lakh+</strong><span>sellers on GeM</span></div>
             <div class="hero-stat"><strong>10,900+</strong><span>product categories</span></div>
             <div class="hero-stat"><strong>4 roles</strong><span>OEM, Reseller, Buyer, Admin</span></div>
-            <div class="hero-stat"><strong>30 day</strong><span>premium calling cycle</span></div>
+            <div class="hero-stat"><strong>5 requests</strong><span>per authorization bundle</span></div>
           </div>
         </div>
       </section>
@@ -312,8 +366,8 @@ function homePage() {
           </div>
           <div class="grid three">
             <article class="card">
-              <h3>Start on GeM</h3>
-              <p>Plain-language learning for newcomers preparing registration, catalogues and first sales conversations.</p>
+              <h3>Build your GeM readiness</h3>
+              <p>Practical guidance for registration, catalogues, compliance, bidding and fulfilment.</p>
               <a class="button secondary" href="#/learn">Learn the basics</a>
             </article>
             <article class="card">
@@ -352,11 +406,11 @@ function homePage() {
             </div>
           </div>
           <div class="grid four">
-            ${["Register and get approved", "Complete profile or request paid setup", "Request OEM authorization", "Record progress and enquiries"].map((text, index) => `
+            ${["Create a verified account", "Complete your business profile", "Request OEM authorization", "Track progress and enquiries"].map((text, index) => `
               <article class="card">
                 <div class="dot">${index + 1}</div>
                 <h3>${text}</h3>
-                <p>${index === 2 ? "Unlock OEM contact access, start the conversation, then request authorization when you are ready." : "Move from verified identity to profile, discovery and real business conversations."}</p>
+                <p>${index === 2 ? "Submit a structured request through Dome and follow its progress from review to OEM action." : "Move from verified identity to a credible profile, relevant discovery and active business relationships."}</p>
               </article>
             `).join("")}
           </div>
@@ -370,34 +424,48 @@ function aboutPage() {
   return shell(`
     <main class="page">
       <header class="page-head">
-        <p class="eyebrow">About GeM and Dome</p>
-        <h1>Dome is the coordination layer for GeM growth.</h1>
-        <p>GeM remains the official marketplace. Dome helps OEMs, Resellers and Buyers prepare, discover each other, communicate, and record relationship progress around that official process.</p>
+        <p class="eyebrow">About Dome</p>
+        <h1>The network that turns GeM participation into business growth.</h1>
+        <p>Winning on GeM takes more than an account. It takes the right catalogue, credible partners, timely authorization, current product information and a team that can move from opportunity to fulfilment. Dome brings that commercial journey into one focused platform.</p>
       </header>
-      <div class="container split">
-        <section class="card">
-          <h2>What Dome does</h2>
+      <section class="section">
+        <div class="container grid three">
+          <article class="card"><span class="tag">For OEMs</span><h2>Turn product strength into channel reach.</h2><p>Publish a credible microsite, keep GeM product links current, receive structured authorization requests and build a reseller network that can carry the catalogue into more opportunities.</p></article>
+          <article class="card"><span class="tag">For Resellers</span><h2>Find the right OEMs and move with context.</h2><p>Show where you sell, what categories you understand and what you have delivered. Request authorization through a managed workflow and track every reachout from your dashboard.</p></article>
+          <article class="card"><span class="tag">For Buyers</span><h2>Discover businesses with a clearer operating picture.</h2><p>Explore OEM and reseller profiles, product coverage and GeM links in a network built for business discovery around public procurement.</p></article>
+        </div>
+      </section>
+      <section class="section alt">
+        <div class="container split about-split">
+          <div>
+            <p class="eyebrow">The Dome advantage</p>
+            <h2>One place for the work between registration and revenue.</h2>
+            <p class="lead-copy">GeM is where official marketplace actions happen. Dome is where businesses become ready for those actions and build the relationships that make them productive.</p>
+          </div>
           <div class="timeline">
             ${[
-              "Educates newcomers through guides, webinars and practical checklists.",
-              "Creates searchable public profiles for OEMs and Resellers.",
-              "Captures registration, approval and onboarding workflows.",
-              "Helps resellers and OEMs start authorization conversations with the right context.",
-              "Captures Buyer enquiries and premium calling readiness."
-            ].map((item, index) => `<div class="timeline-step"><span class="dot">${index + 1}</span><p>${item}</p></div>`).join("")}
+              ["Get ready", "Use practical learning and a role-specific profile to organize the business information that matters."],
+              ["Get discovered", "Present products, GeM links, categories, reach and operating experience in a searchable network."],
+              ["Build authorization", "Route reseller requests through Dome with verified account and profile context already attached."],
+              ["Grow the network", "Give OEMs and resellers a shared view of relationship progress, active products and next actions."]
+            ].map(([title, text], index) => `<div class="timeline-step"><span class="dot">${index + 1}</span><div><h3>${title}</h3><p>${text}</p></div></div>`).join("")}
           </div>
-        </section>
-        <aside class="card">
-          <h2>What Dome does not do</h2>
-          <p class="notice warn">Dome does not register users on GeM, submit bids, validate codes, create official purchase orders or claim to act as the Government e-Marketplace.</p>
-          <p>Whenever an official action is required, Dome should link members to the GeM portal and ask them to record their confirmation once the action is complete.</p>
-        </aside>
-      </div>
+        </div>
+      </section>
+      <section class="section dark">
+        <div class="container boundary-copy">
+          <p class="eyebrow">Built around GeM, clear about the boundary</p>
+          <h2>Dome keeps the commercial journey connected while GeM remains the official marketplace.</h2>
+          <p>Dome helps members prepare, learn, publish profiles, discover partners, exchange authorization context and track relationship progress. When a step becomes an official marketplace action - registration, catalogue submission, OEM verification on GeM, bidding, order acceptance, invoicing or another transaction - the member completes it on GeM.</p>
+          <p>That boundary is a feature: Dome gives the network a dependable place to coordinate without confusing a business-enablement platform with the government marketplace itself.</p>
+          <div class="hero-actions"><a class="button" href="#/register">Join Dome</a><a class="button secondary" href="#/directory">Explore the network</a></div>
+        </div>
+      </section>
     </main>
   `);
 }
 
-function directoryPage() {
+function directoryResults() {
   const { search, type, category } = state.filters;
   const results = state.boot.businesses.filter((item) => {
     const haystack = `${item.name} ${item.type} ${item.category} ${item.secondaryCategory || ""} ${item.city} ${item.description}`.toLowerCase();
@@ -405,13 +473,18 @@ function directoryPage() {
       && (type === "All" || item.type === type)
       && (category === "All" || item.category === category || item.secondaryCategory === category);
   });
+  return results.length ? `<div class="grid three">${results.map(businessCard).join("")}</div>` : `<div class="empty">No businesses match those filters yet.</div>`;
+}
+
+function directoryPage() {
+  const { search, type, category } = state.filters;
 
   return shell(`
     <main class="page">
       <header class="page-head">
         <p class="eyebrow">OEMs and Resellers on Dome</p>
         <h1>Find an OEM or Reseller to grow with.</h1>
-        <p>Search by business name, city, category or role. Sign in or register to request authorization, send enquiries, and use member-only contact workflows.</p>
+        <p>Search by business name, city, category or role. Sign in or register to send enquiries and use Dome's managed authorization workflow.</p>
       </header>
       <div class="container">
         <div class="filters">
@@ -425,7 +498,7 @@ function directoryPage() {
             ${["All", ...state.boot.categories].map((option) => `<option ${option === category ? "selected" : ""}>${option}</option>`).join("")}
           </select>
         </div>
-        ${results.length ? `<div class="grid three">${results.map(businessCard).join("")}</div>` : `<div class="empty">No businesses match those filters yet.</div>`}
+        <div id="directoryResults">${directoryResults()}</div>
       </div>
     </main>
   `);
@@ -533,30 +606,68 @@ function learnPage() {
     <main class="page">
       <header class="page-head">
         <p class="eyebrow">Learn hub</p>
-        <h1>Everything you need to win on GeM.</h1>
-        <p>Plain-language guides for sellers, OEMs and Buyers.</p>
+        <h1>Practical knowledge for every stage of GeM growth.</h1>
+        <p>Build readiness, understand catalogue and authorization workflows, and strengthen the operating habits behind successful fulfilment.</p>
       </header>
-      <div class="container split">
-        <section>
-          <div class="section-head"><h2>Guides</h2></div>
-          <div class="grid">${state.boot.content.guides.map((item) => `
-            <article class="card">
+      <div class="container learn-layout">
+        <section class="learn-section">
+          <div class="section-head"><div><p class="eyebrow">Start here</p><h2>Guides and playbooks</h2></div></div>
+          <div class="grid three">${state.boot.content.guides.map((item) => `
+            <article class="card learn-card">
               <span class="tag">${escapeHtml(item.kind)}</span>
               <h3>${escapeHtml(item.title)}</h3>
               <p>${escapeHtml(item.summary)}</p>
-              <span class="muted">${item.minutes} min read</span>
+              <div class="learn-card-footer"><span class="muted">${item.minutes} min read</span><a class="inline-link" href="#/learn/${escapeHtml(item.slug)}">Read guide</a></div>
             </article>
           `).join("")}</div>
         </section>
-        <aside>
-          <div class="section-head"><h2>From the blog</h2></div>
-          <div class="grid">${state.boot.content.articles.map((item) => `
-            <article class="card">
+        <section class="learn-section">
+          <div class="section-head"><div><p class="eyebrow">Dome field notes</p><h2>From the blog</h2></div></div>
+          <div class="grid three">${state.boot.content.articles.map((item) => `
+            <article class="card learn-card">
               <span class="tag">${escapeHtml(item.tag)}</span>
               <h3>${escapeHtml(item.title)}</h3>
               <p>${escapeHtml(item.summary)}</p>
+              <div class="learn-card-footer"><span class="muted">${item.minutes} min read</span><a class="inline-link" href="#/learn/${escapeHtml(item.slug)}">Read article</a></div>
             </article>
           `).join("")}</div>
+        </section>
+      </div>
+    </main>
+  `);
+}
+
+function learnArticlePage(slug) {
+  const items = [...state.boot.content.guides, ...state.boot.content.articles];
+  const item = items.find((entry) => entry.slug === slug);
+  if (!item) return shell(`<main class="page"><div class="container empty">Learning article not found.</div></main>`);
+  return shell(`
+    <main class="page article-page">
+      <header class="page-head article-head">
+        <a class="back-link" href="#/learn">Back to Learn</a>
+        <p class="eyebrow">${escapeHtml(item.kind || item.tag)} · ${item.minutes} min read</p>
+        <h1>${escapeHtml(item.title)}</h1>
+        <p>${escapeHtml(item.intro)}</p>
+        <div class="tags"><span class="tag dark">For ${escapeHtml(item.audience)}</span></div>
+      </header>
+      <div class="container article-layout">
+        <article class="article-body">
+          ${item.sections.map((section) => `
+            <section>
+              <h2>${escapeHtml(section.title)}</h2>
+              ${(section.paragraphs || []).map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")}
+              ${section.bullets?.length ? `<ul>${section.bullets.map((bullet) => `<li>${escapeHtml(bullet)}</li>`).join("")}</ul>` : ""}
+            </section>
+          `).join("")}
+          <div class="notice"><strong>Use the live rule.</strong><br>GeM processes and category requirements can change. Confirm the current requirement on GeM before an official action.</div>
+        </article>
+        <aside class="article-sources">
+          <div class="card">
+            <p class="eyebrow">Official references</p>
+            <h2>Continue with GeM</h2>
+            <p>These official materials support this guide and are the right place to verify the current process.</p>
+            ${item.sources.map((source) => `<a class="source-link" href="${escapeHtml(source.url)}" target="_blank" rel="noreferrer">${escapeHtml(source.label)}<span>Open source</span></a>`).join("")}
+          </div>
         </aside>
       </div>
     </main>
@@ -592,12 +703,14 @@ function webinarsPage() {
 }
 
 function registerPage() {
+  const phoneSent = state.identity.phoneCodeSent;
+  const emailSent = state.identity.emailCodeSent;
   return shell(`
     <main class="page">
       <header class="page-head">
         <p class="eyebrow">Verified identity</p>
         <h1>Create your Dome account.</h1>
-        <p>Verify your phone and email first. Your business profile comes next, tailored to whether you are a Reseller, OEM or Buyer.</p>
+        <p>Create a secure Dome account, then shape the business profile your partners will discover and trust.</p>
       </header>
       <div class="container split">
         <form class="card" id="registerForm">
@@ -606,30 +719,32 @@ function registerPage() {
             <section class="verify-card ${state.identity.phoneVerified ? "verified" : ""}">
               <div class="verify-head">
                 <span class="step-dot">${state.identity.phoneVerified ? "✓" : "1"}</span>
-                <div><h3>Verify mobile</h3><p>Used for quick login and important account updates.</p></div>
+                <div><h3>Mobile number</h3><p>Your secure sign-in for Dome.</p></div>
               </div>
-              <div class="verify-fields">
-                <label><span class="label">Mobile number</span><input class="input" name="phone" placeholder="+91XXXXXXXXXX" required></label>
-                <label><span class="label">Code</span><input class="input" name="phoneOtp" inputmode="numeric" placeholder="6-digit code"></label>
+              <div class="verify-fields ${phoneSent ? "has-code" : ""}">
+                <label><span class="label">Mobile number</span><input class="input" name="phone" data-identity-field="phone" placeholder="+91XXXXXXXXXX" required value="${escapeHtml(state.identity.phone)}" ${state.identity.phoneVerified ? "readonly" : ""}></label>
+                ${phoneSent && !state.identity.phoneVerified ? `<label><span class="label">Verification code</span><input class="input otp-input" name="phoneOtp" data-otp-code="phone" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="6 digits" value="${escapeHtml(state.identity.phoneOtp)}" autofocus></label>` : ""}
               </div>
               <div class="form-actions compact">
-                <button class="button secondary" type="button" data-action="send-register-code" data-channel="phone">Send code</button>
-                <button class="button" type="button" data-action="verify-register-code" data-channel="phone">Verify mobile</button>
+                ${!state.identity.phoneVerified ? `<button class="button secondary" type="button" data-action="send-register-code" data-channel="phone">${phoneSent ? "Send again" : "Send code"}</button>` : `<span class="verified-label">Mobile verified</span>`}
+                ${phoneSent && !state.identity.phoneVerified ? `<button class="button" type="button" data-action="verify-register-code" data-channel="phone" data-verify-button disabled>Verify mobile</button>` : ""}
               </div>
+              <div id="phoneCodeNotice" class="step-notice" aria-live="polite"></div>
             </section>
             <section class="verify-card ${state.identity.emailVerified ? "verified" : ""}">
               <div class="verify-head">
                 <span class="step-dot">${state.identity.emailVerified ? "✓" : "2"}</span>
-                <div><h3>Verify email</h3><p>Used as backup access and for receipts.</p></div>
+                <div><h3>Email address</h3><p>For account records, confirmations and communication.</p></div>
               </div>
-              <div class="verify-fields">
-                <label><span class="label">Email</span><input class="input" name="email" type="email" required></label>
-                <label><span class="label">Code</span><input class="input" name="emailOtp" inputmode="numeric" placeholder="6-digit code"></label>
+              <div class="verify-fields ${emailSent ? "has-code" : ""}">
+                <label><span class="label">Email</span><input class="input" name="email" data-identity-field="email" type="email" required value="${escapeHtml(state.identity.email)}" ${state.identity.emailVerified ? "readonly" : ""}></label>
+                ${emailSent && !state.identity.emailVerified ? `<label><span class="label">Verification code</span><input class="input otp-input" name="emailOtp" data-otp-code="email" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="6 digits" value="${escapeHtml(state.identity.emailOtp)}"></label>` : ""}
               </div>
               <div class="form-actions compact">
-                <button class="button secondary" type="button" data-action="send-register-code" data-channel="email">Send code</button>
-                <button class="button" type="button" data-action="verify-register-code" data-channel="email">Verify email</button>
+                ${!state.identity.emailVerified ? `<button class="button secondary" type="button" data-action="send-register-code" data-channel="email">${emailSent ? "Send again" : "Send code"}</button>` : `<span class="verified-label">Email verified</span>`}
+                ${emailSent && !state.identity.emailVerified ? `<button class="button" type="button" data-action="verify-register-code" data-channel="email" data-verify-button disabled>Verify email</button>` : ""}
               </div>
+              <div id="emailCodeNotice" class="step-notice" aria-live="polite"></div>
             </section>
           </div>
           <div class="form-grid" style="margin-top:18px">
@@ -637,13 +752,13 @@ function registerPage() {
             <label class="full"><input type="checkbox" name="marketingConsent"> Send me Dome learning and event updates.</label>
           </div>
           <div class="form-actions">
-            <button class="button" type="submit">Create account and continue</button>
+            <button class="button" type="submit" ${state.identity.phoneVerified && state.identity.emailVerified ? "" : "disabled"}>Create account and continue</button>
           </div>
         </form>
         <aside class="grid">
           <div class="card">
-            <h2>Fast signup, richer profile</h2>
-            <p>Start with verified identity. Then add GST, GeM details, products, contacts and order history on the profile screen that matches your role.</p>
+            <h2>A trusted identity first</h2>
+            <p>Verified contact details protect the network. Your role, GST record, products, categories and operating experience are added in the next step.</p>
           </div>
           <div class="card">
             <h2>After signup</h2>
@@ -658,30 +773,33 @@ function registerPage() {
 
 function loginPage() {
   const isPhone = state.loginMode === "phone";
+  const channel = isPhone ? "phone" : "email";
+  const codeSent = state.loginIdentity[`${channel}CodeSent`];
   const isLocalDemo = ["localhost", "127.0.0.1"].includes(location.hostname);
   return shell(`
     <main class="page">
       <header class="page-head">
         <p class="eyebrow">Member access</p>
         <h1>Log in with a secure code.</h1>
-        <p>Use your phone number for the fastest access. Email works as backup.</p>
+        <p>Access your Dome network, requests and business profile.</p>
       </header>
       <div class="container split">
         <form class="card" id="loginForm">
           <div id="formNotice"></div>
           ${isPhone ? `
-            <label><span class="label">Mobile number</span><input class="input" name="loginPhone" placeholder="+919000000001" required></label>
-            <label><span class="label">Code</span><input class="input" name="loginPhoneOtp" inputmode="numeric" placeholder="6-digit code"></label>
+            <label><span class="label">Mobile number</span><input class="input" name="loginPhone" data-login-field="phone" placeholder="+919000000001" required value="${escapeHtml(state.loginIdentity.phone)}"></label>
+            ${codeSent ? `<label><span class="label">Verification code</span><input class="input otp-input" name="loginPhoneOtp" data-login-otp="phone" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="6 digits" value="${escapeHtml(state.loginIdentity.phoneOtp)}" autofocus></label>` : ""}
             <button class="link-button" type="button" data-login-mode="email">Log in another way</button>
           ` : `
-            <label><span class="label">Email</span><input class="input" name="loginEmail" type="email" required placeholder="vendor@dome.com"></label>
-            <label><span class="label">Code</span><input class="input" name="loginEmailOtp" inputmode="numeric" placeholder="6-digit code"></label>
+            <label><span class="label">Email</span><input class="input" name="loginEmail" data-login-field="email" type="email" required placeholder="vendor@dome.com" value="${escapeHtml(state.loginIdentity.email)}"></label>
+            ${codeSent ? `<label><span class="label">Verification code</span><input class="input otp-input" name="loginEmailOtp" data-login-otp="email" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="6 digits" value="${escapeHtml(state.loginIdentity.emailOtp)}" autofocus></label>` : ""}
             <button class="link-button" type="button" data-login-mode="phone">Use mobile number</button>
           `}
           <div class="form-actions">
-            <button class="button secondary" type="button" data-action="send-login-code" data-channel="${isPhone ? "phone" : "email"}">Send code</button>
-            <button class="button" type="button" data-action="verify-login-code" data-channel="${isPhone ? "phone" : "email"}">Verify and log in</button>
+            <button class="button secondary" type="button" data-action="send-login-code" data-channel="${channel}">${codeSent ? "Send again" : "Send code"}</button>
+            ${codeSent ? `<button class="button" type="button" data-action="verify-login-code" data-channel="${channel}" data-login-verify disabled>Verify and log in</button>` : ""}
           </div>
+          <div id="loginCodeNotice" class="step-notice" aria-live="polite"></div>
         </form>
         <aside class="grid">
           ${isLocalDemo ? `<div class="card">
@@ -716,7 +834,7 @@ function dashboardPage() {
   ] : isOem ? [
     ["Complete profile", "GST, products, contacts and microsite plan", "#/profile-setup"],
     ["Reseller discovery", "Find capable resellers", "#/directory"],
-    ["Authorization requests", "Review and advance partner requests", "#/admin"],
+    ["Authorization requests", "Review incoming reseller requests", "#/dashboard"],
     ["Sales kits", "Share brochures, pricing and sales material", "#/learn"]
   ] : isVendor ? [
     ["Complete profile", "GST, GeM seller ID, categories and order count", "#/profile-setup"],
@@ -725,7 +843,7 @@ function dashboardPage() {
   ] : [
     ["Complete profile", "Choose Buyer, Reseller or OEM details", "#/profile-setup"],
     ["Supplier search", "Find OEMs and Resellers", "#/directory"],
-    ["Messages", "Start conversations from supplier profiles", "#/directory"],
+    ["Supplier enquiries", "Send structured enquiries from supplier profiles", "#/directory"],
     ["Webinars", "Register for learning sessions", "#/webinars"]
   ];
 
@@ -766,6 +884,28 @@ function dashboardPage() {
           </div>
         </section>
       ` : ""}
+      ${isOem ? `
+        <section class="section" id="authorizationRequests">
+          <div class="container">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Channel pipeline</p>
+                <h2>Incoming authorization requests</h2>
+              </div>
+            </div>
+            ${state.authorizationRequests.length ? `
+              <div class="grid three">${state.authorizationRequests.map((request) => `
+                <article class="card status-card">
+                  <span class="tag dark">${escapeHtml(request.status)}</span>
+                  <h3>${escapeHtml(request.vendorName || "Dome reseller")}</h3>
+                  <p><strong>${escapeHtml(request.category)}</strong><br>Submitted ${new Date(request.createdAt).toLocaleDateString()} by ${escapeHtml(request.contactName || "verified reseller contact")}.</p>
+                  <p class="muted">Dome is coordinating this request. No separate admin login is required.</p>
+                </article>
+              `).join("")}</div>
+            ` : `<div class="empty">No incoming authorization requests yet. New reseller requests for your OEM profile will appear here.</div>`}
+          </div>
+        </section>
+      ` : ""}
     </main>
   `);
 }
@@ -794,7 +934,7 @@ function profileSetupPage() {
               ${["Reseller", "OEM", "Buyer"].map((item) => `<option ${item === role ? "selected" : ""}>${item}</option>`).join("")}
             </select></label>
             <label><span class="label">Business / organization name</span><input class="input" name="businessName" required value="${escapeHtml(state.profile?.businessName || "")}"></label>
-            <label><span class="label">GST Number</span><input class="input" name="gstNumber" maxlength="15" data-gst-auto value="${escapeHtml(state.profile?.gstNumber || "")}"></label>
+            <label><span class="label">GST Number</span><input class="input" name="gstNumber" maxlength="15" data-gst-auto value="${escapeHtml(state.profile?.gstNumber || "")}"><span id="gstLookupNotice" class="field-note" aria-live="polite"></span></label>
             <label><span class="label">Orders completed on GeM</span><input class="input" name="ordersCompleted" type="number" min="0" value="${escapeHtml(state.profile?.ordersCompleted || "")}"></label>
             <label><span class="label">State</span><input class="input" name="state" value="${escapeHtml(state.profile?.state || "")}"></label>
             <label><span class="label">City</span><input class="input" name="city" value="${escapeHtml(state.profile?.city || "")}"></label>
@@ -839,8 +979,14 @@ function profileSetupPage() {
           </div>
           <div class="card">
             <h2>GST verification</h2>
-            <p>Use GST details to pre-fill and confirm business information before review.</p>
-            ${state.gstLookup ? `<p class="notice success"><strong>${escapeHtml(state.gstLookup.result.tradeName || state.gstLookup.result.legalName)}</strong><br>${escapeHtml(state.gstLookup.result.status)} business record found</p>` : ""}
+            <p>Enter a valid GSTIN and Dome will fill the business fields available from the connected GST record.</p>
+            ${state.gstLookup ? `
+              <div class="notice success gst-summary">
+                <strong>${escapeHtml(pickGstValue(state.gstLookup.result, ["tradeName", "tradeNam", "legalName", "lgnm"]))}</strong>
+                <span>${escapeHtml(pickGstValue(state.gstLookup.result, ["status", "gstStatus", "sts"]) || "Record found")}</span>
+                <span>${escapeHtml(pickGstValue(state.gstLookup.result, ["constitution", "constitutionOfBusiness", "ctb"]))}</span>
+                <span>${escapeHtml(pickGstValue(state.gstLookup.result, ["registrationDate", "rgdt"]))}</span>
+              </div>` : ""}
           </div>
           ${isOem ? `
             <div class="card plan-panel">
@@ -905,30 +1051,37 @@ function simpleFormPage(kind, id = "") {
     }
     const resellerName = state.profile?.businessName || state.user?.businessName || "";
     const contactName = state.profile?.contactPerson || "";
-    const phone = state.user?.phone || "";
+    const preferredCategories = state.profile?.lookingForCategories || [];
+    const categoryOptions = [...new Set([business.category, ...preferredCategories, ...state.boot.categories])];
     return shell(`
       <main class="page"><div class="container split">
-        <header class="page-head"><p class="eyebrow">Authorization request</p><h1>Request authorization from ${escapeHtml(business.name)}.</h1><p>Dome will process this request and send it to the OEM. OEM phone and email are not shared directly.</p></header>
+        <header class="page-head"><p class="eyebrow">Authorization request</p><h1>Request authorization from ${escapeHtml(business.name)}.</h1><p>Dome will attach your verified account and reseller profile, review the request and route it to the OEM.</p></header>
         <form class="card" id="authorizationForm" data-oem-id="${business.id}">
           <div id="formNotice"></div>
-          <label><span class="label">Reseller business name</span><input class="input" name="vendorName" required value="${escapeHtml(resellerName)}"></label>
-          <label><span class="label">Contact person</span><input class="input" name="contactName" required value="${escapeHtml(contactName)}"></label>
-          <label><span class="label">Email</span><input class="input" name="email" type="email" required value="${escapeHtml(state.user?.email || "")}"></label>
-          <label><span class="label">Phone</span><input class="input" name="phone" required value="${escapeHtml(phone)}"></label>
-          <label><span class="label">Product category</span><select class="select" name="category"><option>${escapeHtml(business.category)}</option>${state.boot.categories.map((cat) => `<option>${escapeHtml(cat)}</option>`).join("")}</select></label>
-          <label><span class="label">Message</span><textarea class="textarea" name="message" required placeholder="Tell the OEM why you want authorization and where you sell."></textarea></label>
-          <div class="form-actions"><button class="button" type="submit">Submit to Dome</button></div>
+          <div class="request-identity">
+            <span class="avatar small-avatar">${escapeHtml((resellerName || "D").split(/\s+/).map((part) => part[0]).join("").slice(0, 2))}</span>
+            <div><strong>${escapeHtml(resellerName)}</strong><p>${escapeHtml(contactName || "Profile contact")} · ${escapeHtml(state.user?.email || "")} · ${escapeHtml(state.user?.phone || "")}</p></div>
+          </div>
+          <label><span class="label">Product category</span><select class="select" name="category" required>${categoryOptions.map((cat) => `<option>${escapeHtml(cat)}</option>`).join("")}</select></label>
+          <p class="muted">Need to change these details? <a class="inline-link" href="#/profile-setup">Update your profile</a> before submitting.</p>
+          <div class="form-actions"><button class="button" type="submit">Send authorization request</button></div>
         </form>
       </div></main>`);
   }
 
   if (kind === "webinar" && webinar) {
+    const webinarValues = {
+      name: state.profile?.contactPerson || state.profile?.contactList?.[0]?.name || state.user?.businessName || "",
+      organization: state.profile?.businessName || state.user?.businessName || "",
+      email: state.user?.email || "",
+      phone: state.user?.phone || ""
+    };
     return shell(`
       <main class="page"><div class="container split">
         <header class="page-head"><p class="eyebrow">Webinar registration</p><h1>${escapeHtml(webinar.title)}</h1><p>${escapeHtml(webinar.summary)} Fee: ${webinar.fee ? money(webinar.fee) : "Free"}.</p></header>
         <form class="card" id="webinarForm" data-webinar-id="${webinar.id}">
           <div id="formNotice"></div>
-          ${contactFields(true)}
+          ${contactFields(true, webinarValues)}
           <div class="form-actions"><button class="button" type="submit">Register</button></div>
           ${webinar.fee ? `<p class="notice warn">Paid sessions reserve your seat after payment confirmation.</p>` : ""}
         </form>
@@ -950,12 +1103,12 @@ function simpleFormPage(kind, id = "") {
     </div></main>`);
 }
 
-function contactFields(includeOrganization = false) {
+function contactFields(includeOrganization = false, values = {}) {
   return `
-    <label><span class="label">Name</span><input class="input" name="name" required></label>
-    ${includeOrganization ? `<label><span class="label">Organization</span><input class="input" name="organization" required></label>` : `<label><span class="label">Organization</span><input class="input" name="organization"></label>`}
-    <label><span class="label">Email</span><input class="input" name="email" type="email" required></label>
-    <label><span class="label">Phone</span><input class="input" name="phone" required></label>
+    <label><span class="label">Name</span><input class="input" name="name" required value="${escapeHtml(values.name || "")}"></label>
+    ${includeOrganization ? `<label><span class="label">Organization</span><input class="input" name="organization" required value="${escapeHtml(values.organization || "")}"></label>` : `<label><span class="label">Organization</span><input class="input" name="organization" value="${escapeHtml(values.organization || "")}"></label>`}
+    <label><span class="label">Email</span><input class="input" name="email" type="email" required value="${escapeHtml(values.email || "")}"></label>
+    <label><span class="label">Phone</span><input class="input" name="phone" required value="${escapeHtml(values.phone || "")}"></label>
   `;
 }
 
@@ -981,7 +1134,7 @@ function adminPage() {
       <header class="page-head">
         <p class="eyebrow">Admin portal</p>
         <h1>Launch operations queue.</h1>
-        <p>Enter the deployment admin key to review applications, setup requests, enquiries and audit activity. Local development uses <strong>DOMEADMIN</strong>.</p>
+        <p>Review member applications, authorization requests, setup work, registrations and platform activity.</p>
       </header>
       <div class="container">
         <div class="card">
@@ -1015,8 +1168,8 @@ function adminTable(tab, rows) {
   `).join("")}</tbody></table></div>`;
 }
 
-function notice(message, type = "") {
-  const target = document.querySelector("#formNotice");
+function notice(message, type = "", selector = "#formNotice") {
+  const target = document.querySelector(selector);
   if (target) target.innerHTML = `<p class="notice ${type}">${escapeHtml(message)}</p>`;
 }
 
@@ -1123,9 +1276,12 @@ async function handleClick(event) {
         ? { channel, email: payload.email, purpose: "registration" }
         : { channel, phone: payload.phone, purpose: "registration" };
       const result = await api("/api/otp/start", { method: "POST", body: JSON.stringify(body) });
-      notice(result.devCode ? `Code sent. Use ${result.devCode} for this demo.` : "Code sent.");
+      state.identity[`${channel}CodeSent`] = true;
+      state.identity[`${channel}Otp`] = "";
+      render();
+      notice(result.devCode ? `Code sent. Demo code: ${result.devCode}.` : "Code sent. Enter the 6-digit code below.", "success", `#${channel}CodeNotice`);
     } catch (error) {
-      notice(error.message, "error");
+      notice(error.message, "error", `#${channel}CodeNotice`);
     }
   }
   if (action === "verify-register-code") {
@@ -1133,20 +1289,17 @@ async function handleClick(event) {
     const form = document.querySelector("#registerForm");
     try {
       const payload = formPayload(form);
+      const code = channel === "email" ? payload.emailOtp : payload.phoneOtp;
+      if (!/^\d{6}$/.test(String(code || ""))) throw new Error("Enter the 6-digit verification code.");
       const body = channel === "email"
         ? { channel, email: payload.email, code: payload.emailOtp }
         : { channel, phone: payload.phone, code: payload.phoneOtp };
       await api("/api/otp/verify", { method: "POST", body: JSON.stringify(body) });
       state.identity[channel === "email" ? "emailVerified" : "phoneVerified"] = true;
-      notice(channel === "email" ? "Email verified." : "Mobile verified.");
-      const card = event.target.closest(".verify-card");
-      if (card) {
-        card.classList.add("verified");
-        const dot = card.querySelector(".step-dot");
-        if (dot) dot.textContent = "✓";
-      }
+      render();
+      notice(channel === "email" ? "Email verified." : "Mobile verified.", "success", `#${channel}CodeNotice`);
     } catch (error) {
-      notice(error.message, "error");
+      notice(error.message, "error", `#${channel}CodeNotice`);
     }
   }
   if (action === "send-login-code") {
@@ -1158,9 +1311,12 @@ async function handleClick(event) {
         ? { channel, email: payload.loginEmail, purpose: "login" }
         : { channel, phone: payload.loginPhone, purpose: "login" };
       const result = await api("/api/otp/start", { method: "POST", body: JSON.stringify(body) });
-      notice(result.devCode ? `Code sent. Use ${result.devCode} for this demo.` : "Code sent.");
+      state.loginIdentity[`${channel}CodeSent`] = true;
+      state.loginIdentity[`${channel}Otp`] = "";
+      render();
+      notice(result.devCode ? `Code sent. Demo code: ${result.devCode}.` : "Code sent. Enter the 6-digit code below.", "success", "#loginCodeNotice");
     } catch (error) {
-      notice(error.message, "error");
+      notice(error.message, "error", "#loginCodeNotice");
     }
   }
   if (action === "verify-login-code") {
@@ -1168,6 +1324,8 @@ async function handleClick(event) {
     const form = document.querySelector("#loginForm");
     try {
       const payload = formPayload(form);
+      const code = channel === "email" ? payload.loginEmailOtp : payload.loginPhoneOtp;
+      if (!/^\d{6}$/.test(String(code || ""))) throw new Error("Enter the 6-digit verification code.");
       const verifyBody = channel === "email"
         ? { channel, email: payload.loginEmail, code: payload.loginEmailOtp }
         : { channel, phone: payload.loginPhone, code: payload.loginPhoneOtp };
@@ -1185,7 +1343,7 @@ async function handleClick(event) {
       localStorage.setItem("domeToken", result.token);
       setRoute(result.user.role === "Admin" ? "/admin" : "/dashboard");
     } catch (error) {
-      notice(error.message, "error");
+      notice(error.message, "error", "#loginCodeNotice");
     }
   }
   if (action === "send-phone-otp" || action === "send-otp") {
@@ -1261,7 +1419,7 @@ async function handleClick(event) {
       state.profile = result.profile;
       localStorage.setItem("domeUser", JSON.stringify(result.user));
       render();
-      notice(result.mode === "mock" ? `Dome+ activated in mock payment mode. ${money(result.payment.amount)} recorded.` : "Dome+ payment verified and plan activated.");
+      notice(result.mode === "mock" ? `Dome+ activated. ${money(result.payment.amount)} recorded for this demo.` : "Dome+ payment verified and plan activated.");
     } catch (error) {
       notice(error.message, "error");
     }
@@ -1346,6 +1504,28 @@ async function loadAdmin(shouldRender = true) {
 }
 
 function handleInput(event) {
+  const identityField = event.target.dataset.identityField;
+  if (identityField) state.identity[identityField] = event.target.value;
+
+  const loginField = event.target.dataset.loginField;
+  if (loginField) state.loginIdentity[loginField] = event.target.value;
+
+  const otpChannel = event.target.dataset.otpCode;
+  if (otpChannel) {
+    event.target.value = event.target.value.replace(/\D/g, "").slice(0, 6);
+    state.identity[`${otpChannel}Otp`] = event.target.value;
+    const button = event.target.closest(".verify-card")?.querySelector("[data-verify-button]");
+    if (button) button.disabled = event.target.value.length !== 6;
+  }
+
+  const loginOtpChannel = event.target.dataset.loginOtp;
+  if (loginOtpChannel) {
+    event.target.value = event.target.value.replace(/\D/g, "").slice(0, 6);
+    state.loginIdentity[`${loginOtpChannel}Otp`] = event.target.value;
+    const button = document.querySelector("[data-login-verify]");
+    if (button) button.disabled = event.target.value.length !== 6;
+  }
+
   if (event.target.matches("[data-profile-role]")) {
     state.profile = { ...(state.profile || {}), role: event.target.value };
     state.productDraftRows = null;
@@ -1365,16 +1545,18 @@ function handleInput(event) {
         state.gstLookupTarget = gstNumber;
         state.gstLookup = await api("/api/gst/lookup", { method: "POST", body: JSON.stringify({ gstNumber }) });
         applyGstLookupToForm(form, state.gstLookup.result || {});
-        notice(`GST details found for ${state.gstLookup.result.tradeName || state.gstLookup.result.legalName}.`);
+        const gstName = pickGstValue(state.gstLookup.result, ["tradeName", "tradeNam", "legalName", "lgnm"]);
+        notice(`GST details found${gstName ? ` for ${gstName}` : ""}. Business fields have been filled where available.`, "success", "#gstLookupNotice");
       } catch (error) {
-        notice(error.message, "error");
+        notice(error.message, "error", "#gstLookupNotice");
       }
     }, 450);
   }
   const filter = event.target.dataset.filter;
   if (filter) {
     state.filters[filter] = event.target.value;
-    render();
+    const results = document.querySelector("#directoryResults");
+    if (results) results.innerHTML = directoryResults();
   }
   if (event.target.matches("[data-admin-key]")) {
     state.adminKey = event.target.value;
@@ -1391,6 +1573,7 @@ function render() {
   else if (route === "/directory") html = directoryPage();
   else if (pathname === "profile") html = profilePage(id);
   else if (route === "/learn") html = learnPage();
+  else if (pathname === "learn" && id) html = learnArticlePage(id);
   else if (route === "/webinars") html = webinarsPage();
   else if (route === "/register") html = registerPage();
   else if (route === "/login") html = loginPage();

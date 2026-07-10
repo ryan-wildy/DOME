@@ -225,14 +225,116 @@ const businesses = [
 
 const content = {
   guides: [
-    { title: "How to register on GeM, step by step", kind: "Guide", minutes: 6, summary: "A practical checklist for new sellers preparing their GeM profile." },
-    { title: "Vendor Assessment, explained", kind: "Guide", minutes: 5, summary: "What the QCI assessment is and how to prepare your documents." },
-    { title: "OEM authorization for resellers", kind: "Playbook", minutes: 5, summary: "How resellers request, receive and confirm authorization beside GeM." }
+    {
+      slug: "seller-registration-readiness",
+      title: "Get ready for GeM seller registration",
+      kind: "Guide",
+      minutes: 8,
+      summary: "Prepare the identity, tax and business records that make registration and profile completion smoother.",
+      audience: "New sellers and service providers",
+      intro: "Registration is easier when the authorized person and the organization records are aligned before the first login. Use this as a readiness check, then complete every official step on GeM.",
+      sections: [
+        { title: "Start with the authorized person", paragraphs: ["GeM's published prerequisites say the seller account should be created by an authorized person, such as a proprietor, partner, director or another permitted key person. Keep the personal identity details used for Aadhaar or PAN verification available, along with an active email address and mobile access."] },
+        { title: "Prepare the organization record", bullets: ["Business constitution and organization PAN", "Date of incorporation or registration", "CIN where applicable", "Office address and bank details for profile completion", "ITR details when required for Bid or Reverse Auction participation"] },
+        { title: "Complete the seller journey in order", paragraphs: ["Create the seller account on GeM, complete the organization profile, and then add products or services through Catalogue. The official GeM seller learning journey separately covers account management, catalogue management, Bid and RA participation, and order fulfilment."], bullets: ["Use the exact legal details held in the source records", "Review every auto-fetched field before confirming", "Keep proof for claims made in the organization and catalogue profile", "Treat Dome as your preparation and partner workspace; complete transactions on GeM"] }
+      ],
+      sources: [
+        { label: "GeM seller registration prerequisites", url: "https://assets-bg.gem.gov.in/resources/pdf/seller-registration-pre-requisites-v1.2.pdf" },
+        { label: "Official GeM Seller Journey", url: "https://elearning.gem.gov.in/course/index.php?categoryid=2" }
+      ]
+    },
+    {
+      slug: "vendor-assessment-readiness",
+      title: "Prepare for Vendor Assessment",
+      kind: "Guide",
+      minutes: 9,
+      summary: "Organize the evidence behind your location, financial capacity and production capability before assessment.",
+      audience: "OEMs and assessed sellers",
+      intro: "Vendor Assessment is evidence-led. A clean document trail and an assessment-ready facility reduce avoidable clarification cycles.",
+      sections: [
+        { title: "Understand the assessment shape", paragraphs: ["GeM's published Vendor Assessment methodology groups assessment around physical location, financial capacity and production capability. The process described in the manual includes a desktop review of submitted information and a video assessment that validates the declared facility and process."] },
+        { title: "Build one evidence folder", bullets: ["Current organization and factory or office records", "Financial records that match the entity being assessed", "Manufacturing or production-flow evidence", "Machinery, testing and quality-control records where applicable", "Product and brand evidence consistent with the GeM catalogue"] },
+        { title: "Run a consistency review", paragraphs: ["Names, addresses, dates and capacities should agree across source documents, the GeM profile and the evidence shown during assessment. Resolve discrepancies before submission and answer any non-compliance observation with the exact supporting record requested."] }
+      ],
+      sources: [
+        { label: "GeM Vendor Assessment methodology", url: "https://assets-bg.gem.gov.in/resources/pdf/user_manual_gem_va.pdf" },
+        { label: "Official GeM Seller Journey", url: "https://elearning.gem.gov.in/course/index.php?categoryid=2" }
+      ]
+    },
+    {
+      slug: "oem-authorization-workflow",
+      title: "Build a clean OEM authorization workflow",
+      kind: "Playbook",
+      minutes: 7,
+      summary: "Give OEMs the business context they need and keep every authorization status visible to both sides.",
+      audience: "Resellers and OEM channel teams",
+      intro: "Authorization works best as a managed relationship, not a one-off document request. Dome collects a reseller's verified business context, routes the request and keeps the progress visible.",
+      sections: [
+        { title: "For resellers", bullets: ["Complete the reseller profile and GeM seller details", "Choose the relevant product category", "Submit the authorization request through the OEM microsite", "Respond promptly if Dome or the OEM asks for category, territory or capability evidence", "Keep sourcing and chain documents required for the product and catalogue route"] },
+        { title: "For OEMs", bullets: ["Publish accurate products and GeM links", "Review the reseller's location, category fit and order history", "Define the authorization scope and internal owner", "Keep the reseller status current so the network can act on it"] },
+        { title: "Remember the catalogue rules", paragraphs: ["GeM catalogue treatment varies by category quadrant. Official GeM material describes different participation rules for OEMs and resellers across Q1 to Q4, so members should confirm the current category requirement on GeM before listing, bidding or accepting an order."] }
+      ],
+      sources: [
+        { label: "GeM overview and catalogue quadrant policy", url: "https://assets-bg.gem.gov.in/resources/upload/shared_doc/gem-overview-ppt-2-september-2024-1_1725964078.pdf" },
+        { label: "GeM General Terms and Conditions", url: "https://assets-bg.gem.gov.in/resources/upload/shared_doc/gtc/general-te-1675401798.pdf" }
+      ]
+    }
   ],
   articles: [
-    { title: "Q2 vs Q3/Q4 categories, in plain language", tag: "How-to", summary: "Why authorization differs by category and what resellers should check first." },
-    { title: "How a fresher won their first GeM order in 3 weeks", tag: "Story", summary: "From registration to first purchase order, without skipping compliance." },
-    { title: "Why an OEM market rate list saves everyone time", tag: "Growth", summary: "Consistent pricing makes vendors faster and bids cleaner." }
+    {
+      slug: "gem-catalogue-quadrants",
+      title: "Q1 to Q4: what the catalogue route changes",
+      tag: "Catalogue",
+      minutes: 6,
+      summary: "A working view of who can create or pair a catalogue and where OEM approval matters.",
+      audience: "OEMs and product resellers",
+      intro: "The category quadrant affects how an OEM or reseller participates in catalogue creation. Check the live category rule on GeM before acting because category configuration and policy can change.",
+      sections: [
+        { title: "The practical distinction", bullets: ["Q1: catalogue participation is restricted to OEMs", "Q2: OEMs and their authorized resellers participate", "Q3: OEMs and/or authorized resellers may participate concurrently", "Q4: OEMs and resellers can participate, subject to the applicable obligations"] },
+        { title: "What a reseller should verify", paragraphs: ["Confirm the quadrant shown for the exact category, whether the OEM has verified the reseller on GeM, and what undertaking or sourcing evidence applies. In Q3 and Q4, GeM's published terms describe an undertaking route when a reseller is not approved by the OEM; the reseller remains responsible for genuine sourcing and chain documentation."], bullets: ["Exact category and quadrant", "OEM verification status", "Catalogue pairing or upload route", "Warranty responsibility", "Required chain and compliance documents"] },
+        { title: "Where Dome fits", paragraphs: ["Dome helps the parties find each other, exchange the business context required for authorization and track the relationship. The catalogue, undertaking, bid and order actions remain on GeM."] }
+      ],
+      sources: [
+        { label: "GeM catalogue quadrant overview", url: "https://assets-bg.gem.gov.in/resources/upload/shared_doc/gem-overview-ppt-2-september-2024-1_1725964078.pdf" },
+        { label: "GeM General Terms and Conditions", url: "https://assets-bg.gem.gov.in/resources/upload/shared_doc/gtc/general-te-1675401798.pdf" }
+      ]
+    },
+    {
+      slug: "first-order-readiness",
+      title: "Your first GeM order starts before the bid",
+      tag: "Operations",
+      minutes: 7,
+      summary: "Build the catalogue, compliance and fulfilment discipline needed before pursuing an opportunity.",
+      audience: "New and early-stage sellers",
+      intro: "A first order is rarely won by registration alone. Readiness comes from a usable catalogue, accurate commercial assumptions and a fulfilment plan that can survive the order terms.",
+      sections: [
+        { title: "Make the account usable", bullets: ["Complete organization and bank details", "Add the correct product or service catalogue", "Keep tax, experience and eligibility records current", "Assign internal responsibility for bids, orders and delivery"] },
+        { title: "Read before you respond", paragraphs: ["Study the specification, quantity, delivery location, bid dates, eligibility conditions and buyer-added terms. Match the offer to an approved catalogue and cost delivery, tax, warranty and service obligations before fixing a price."] },
+        { title: "Prepare fulfilment before award", bullets: ["Confirm stock or supply capacity", "Plan dispatch and proof of delivery", "Keep invoice and acceptance documentation aligned", "Track order milestones and raise issues through the official GeM process"] }
+      ],
+      sources: [
+        { label: "Official GeM Seller Journey", url: "https://elearning.gem.gov.in/course/index.php?categoryid=2" },
+        { label: "GeM seller registration guide", url: "https://assets-bg.gem.gov.in/resources/pdf/register-on-gem-consolidated-11-languages.pdf" }
+      ]
+    },
+    {
+      slug: "oem-reseller-sales-kit",
+      title: "The OEM sales kit every reseller can use",
+      tag: "Growth",
+      minutes: 5,
+      summary: "Turn product, pricing and fulfilment knowledge into a channel-ready package.",
+      audience: "OEM channel and government-sales teams",
+      intro: "Resellers move faster when the OEM gives them one reliable operating pack. The goal is consistency across discovery, catalogue matching, quotation and fulfilment.",
+      sections: [
+        { title: "The core pack", bullets: ["Product catalogue with current GeM links", "Category and specification mapping", "Commercial guidance with validity dates", "Territory, stock and delivery information", "Warranty and escalation path", "Brand assets and approved product copy"] },
+        { title: "Keep control without creating friction", paragraphs: ["Give every file an owner, version date and expiry date. Separate public product material from reseller-only commercial material, and make obsolete versions unavailable. Dome can become the shared layer where the OEM publishes the current microsite and the reseller sees the material relevant to the relationship."] },
+        { title: "Measure usefulness", bullets: ["Time from request to reseller response", "Catalogue-link accuracy", "Number of active reseller relationships", "Authorization turnaround time", "Expired document or price-sheet incidents"] }
+      ],
+      sources: [
+        { label: "Official GeM Seller Journey", url: "https://elearning.gem.gov.in/course/index.php?categoryid=2" },
+        { label: "GeM General Terms and Conditions", url: "https://assets-bg.gem.gov.in/resources/upload/shared_doc/gtc/general-te-1675401798.pdf" }
+      ]
+    }
   ],
   roadmap: [
     "Real Razorpay/PayU payment capture and GST invoices",
@@ -772,12 +874,17 @@ function revealedContactsForUser(db, user) {
 }
 
 function authorizationRequestsForUser(db, user) {
+  const isOem = user.role === "OEM" && user.businessId;
   return db.authorizationRequests
-    .filter((request) => request.userId === user.id || request.userEmail === user.email || request.email === user.email)
+    .filter((request) => isOem
+      ? request.oemId === user.businessId
+      : request.userId === user.id || request.userEmail === user.email || request.email === user.email)
     .map((request) => ({
       id: request.id,
       oemId: request.oemId,
       oemName: request.oemName,
+      vendorName: request.vendorName,
+      contactName: request.contactName,
       category: request.category,
       status: request.status,
       createdAt: request.createdAt,
@@ -1038,7 +1145,9 @@ async function api(req, res, pathname) {
   if (req.method === "POST" && pathname === "/api/otp/verify") {
     const payload = await readBody(req);
     const { channel, target } = otpTarget(payload);
-    const codeHash = crypto.createHash("sha256").update(String(payload.code || "")).digest("hex");
+    const code = String(payload.code || "").trim();
+    if (!/^\d{6}$/.test(code)) return json(res, 422, { error: "Enter the 6-digit verification code." });
+    const codeHash = crypto.createHash("sha256").update(code).digest("hex");
     const record = db.otps.find((otp) => (otp.target || otp.phone) === target && otp.channel === channel && otp.codeHash === codeHash && new Date(otp.expiresAt).getTime() > Date.now());
     if (!record) return json(res, 422, { error: "The OTP is invalid or expired." });
     record.verified = true;
@@ -1146,22 +1255,24 @@ async function api(req, res, pathname) {
     const liveUser = db.users.find((user) => user.id === tokenUser.id);
     if (!liveUser) return json(res, 401, { error: "Session user not found." });
     const payload = await readBody(req);
-    const missing = required(payload, ["oemId", "vendorName", "contactName", "email", "phone", "category", "message"]);
+    const missing = required(payload, ["oemId", "category"]);
     if (missing.length) return json(res, 422, { error: `Missing required fields: ${missing.join(", ")}` });
     const oem = db.businesses.find((item) => item.id === payload.oemId && item.type === "OEM");
     if (!oem) return json(res, 404, { error: "OEM profile not found." });
+    const requesterProfile = profileForUser(db, liveUser);
+    const existing = db.authorizationRequests.find((item) => item.userId === liveUser.id && item.oemId === oem.id && !["Declined", "Closed"].includes(item.status));
+    if (existing) return json(res, 200, { ok: true, request: existing, existing: true });
     const request = {
       id: crypto.randomUUID(),
       userId: liveUser.id,
       userEmail: liveUser.email,
       oemId: oem.id,
       oemName: oem.name,
-      vendorName: String(payload.vendorName).trim(),
-      contactName: String(payload.contactName).trim(),
-      email: String(payload.email).toLowerCase().trim(),
-      phone: normalizePhone(payload.phone),
+      vendorName: requesterProfile?.businessName || liveUser.businessName || "Dome member",
+      contactName: requesterProfile?.contactPerson || liveUser.businessName || "Dome member",
+      email: liveUser.email,
+      phone: normalizePhone(liveUser.phone),
       category: String(payload.category).trim(),
-      message: String(payload.message).trim(),
       status: "Requested",
       timeline: [{ stage: "Requested", at: new Date().toISOString(), by: "Reseller" }, { stage: "Dome review", at: new Date().toISOString(), by: "Dome" }],
       createdAt: new Date().toISOString()
@@ -1422,7 +1533,8 @@ async function api(req, res, pathname) {
         headers: { authorization: `Bearer ${process.env.GST_API_KEY}` }
       });
       if (!response.ok) return json(res, 502, { error: "GST provider lookup failed." });
-      return json(res, 200, { ok: true, mode: "provider", result: await response.json() });
+      const providerResult = await response.json();
+      return json(res, 200, { ok: true, mode: "provider", result: providerResult.data || providerResult.result || providerResult });
     }
     return json(res, 200, {
       ok: true,
@@ -1435,6 +1547,9 @@ async function api(req, res, pathname) {
         stateName: "Delhi",
         city: "New Delhi",
         address: "Demo Business Park, Connaught Place, New Delhi",
+        registrationDate: "2019-04-01",
+        taxpayerType: "Regular",
+        contactPerson: "Demo Authorised Signatory",
         constitution: "Proprietorship",
         natureOfBusiness: "Retail and wholesale supply",
         status: "Active",
