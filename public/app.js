@@ -343,7 +343,6 @@ async function verifyLoginOtp(channel) {
     if (channel === "email" && state.loginIdentity.needsRegistration) {
       render();
       notice("Email verified. Your Dome account is ready to create.", "success", "#loginCodeNotice");
-      if (state.loginIdentity.consent) await createAccountFromLogin();
       return;
     }
 
@@ -1701,7 +1700,6 @@ function handleInput(event) {
   const loginConsent = event.target.dataset.loginConsent;
   if (loginConsent) {
     state.loginIdentity[loginConsent] = event.target.checked;
-    if (loginConsent === "consent" && event.target.checked && state.loginIdentity.emailVerified) void createAccountFromLogin();
   }
 
   const otpChannel = event.target.dataset.otpCode;

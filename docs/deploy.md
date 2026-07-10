@@ -67,7 +67,12 @@ RESEND_API_KEY=
 SENDGRID_API_KEY=
 EMAIL_FROM="Dome <verify@yourdomain.com>"
 
-# GST lookup
+# GST lookup - recommended provider
+GST_PROVIDER=sandbox
+GST_SANDBOX_API_KEY=
+GST_SANDBOX_API_SECRET=
+
+# Optional custom-provider fallback
 GST_API_URL=
 GST_API_KEY=
 GST_API_KEY_HEADER=authorization
@@ -101,4 +106,6 @@ TWILIO_FROM=
 
 For India production, replace this with the final DLT-compliant SMS/WhatsApp provider selected by PrintoDome.
 
-`GST_API_URL` may be a base endpoint, in which case Dome adds a `gstin` query parameter, or it may contain a `{gstin}` placeholder. `GST_API_KEY_HEADER` and `GST_API_KEY_PREFIX` allow the provider's authentication convention to be configured without code changes.
+The recommended integration is [Sandbox GST Public API](https://developer.sandbox.co.in/api-reference/gst/compliance/guides/public/overview). Create a Sandbox account, copy its API key and secret into Render, and set `GST_PROVIDER=sandbox`. Dome authenticates with Sandbox, caches the 24-hour access token for 23 hours, and calls the Search GSTIN endpoint for legal name, trade name, registration status, taxpayer type, business nature and principal address.
+
+For another provider, leave `GST_PROVIDER` empty. `GST_API_URL` may be a base endpoint, in which case Dome adds a `gstin` query parameter, or it may contain a `{gstin}` placeholder. `GST_API_KEY_HEADER` and `GST_API_KEY_PREFIX` configure the provider's authentication convention without code changes.

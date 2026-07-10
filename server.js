@@ -24,6 +24,11 @@ const GST_API_URL = process.env.GST_API_URL || "";
 const GST_API_KEY = process.env.GST_API_KEY || "";
 const GST_API_KEY_HEADER = process.env.GST_API_KEY_HEADER || "authorization";
 const GST_API_KEY_PREFIX = process.env.GST_API_KEY_PREFIX ?? "Bearer ";
+const GST_PROVIDER = process.env.GST_PROVIDER || "";
+const GST_SANDBOX_API_KEY = process.env.GST_SANDBOX_API_KEY || "";
+const GST_SANDBOX_API_SECRET = process.env.GST_SANDBOX_API_SECRET || "";
+const GST_SANDBOX_BASE_URL = process.env.GST_SANDBOX_BASE_URL || "https://api.sandbox.co.in";
+let gstSandboxToken = { value: "", expiresAt: 0 };
 const OEM_PLANS = {
   basic: {
     id: "basic",
@@ -611,7 +616,8 @@ function publicBootstrap(db) {
       paymentMode: paymentMode(),
       razorpayKeyId: RAZORPAY_KEY_ID,
       oemPlans: OEM_PLANS,
-      gstLookupMode: GST_API_URL && GST_API_KEY ? "provider" : "manual"
+      gstLookupMode: gstLookupConfigured() ? "provider" : "manual",
+      gstProvider: GST_PROVIDER === "sandbox" ? "Sandbox GST" : GST_API_URL ? "Configured GST service" : ""
     },
     counts: {
       applications: db.applications.length,
@@ -916,6 +922,67 @@ function authorizationRequestsForUser(db, user) {
 
 function paymentMode() {
   return PAYMENT_MODE === "razorpay" && RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET ? "razorpay" : "mock";
+}
+
+function gstLookupConfigured() {
+  if (GST_PROVIDER === "sandbox") return Boolean(GST_SANDBOX_API_KEY && GST_SANDBOX_API_SECRET);
+  return Boolean(GST_API_URL && GST_API_KEY);
+}
+
+async function sandboxGstAccessToken() {
+  if (gstSandboxToken.value && gstSandboxToken.expiresAt > Date.now()) return gstSandboxToken.value;
+  const response = await fetch(`${GST_SANDBOX_BASE_URL}/authenticate`, {
+    method: "POST",
+    headers: {
+      "x-api-key": GST_SANDBOX_API_KEY,
+      "x-api-secret": GST_SANDBOX_API_SECRET,
+      "x-api-version": "1.0.0",
+      "content-type": "application/json"
+    }
+  });
+  const payload = await response.json().catch(() => ({}));
+  const token = payload?.data?.access_token;
+  if (!response.ok || !token) throw new Error("GST provider authentication failed.");
+  gstSandboxToken = { value: token, expiresAt: Date.now() + 23 * 60 * 60 * 1000 };
+  return token;
+}
+
+async function lookupGstin(gstNumber) {
+  if (GST_PROVIDER === "sandbox") {
+    const token = await sandboxGstAccessToken();
+    const response = await fetch(`${GST_SANDBOX_BASE_URL}/gst/compliance/public/gstin/search`, {
+      method: "POST",
+      headers: {
+        "x-api-key": GST_SANDBOX_API_KEY,
+        authorization: token,
+        "x-api-version": "1.0.0",
+        "x-accept-cache": "true",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ gstin: gstNumber })
+    });
+    const payload = await response.json().catch(() => ({}));
+    const result = payload?.data?.data;
+    if (!response.ok || !result || typeof result !== "object") throw new Error("GSTIN was not found by the GST provider.");
+    return { provider: "sandbox", result };
+  }
+
+  let providerUrl;
+  if (GST_API_URL.includes("{gstin}")) {
+    providerUrl = GST_API_URL.replace("{gstin}", encodeURIComponent(gstNumber));
+  } else {
+    const url = new URL(GST_API_URL);
+    url.searchParams.set("gstin", gstNumber);
+    providerUrl = url.toString();
+  }
+  const response = await fetch(providerUrl, {
+    headers: { [GST_API_KEY_HEADER]: `${GST_API_KEY_PREFIX}${GST_API_KEY}` }
+  });
+  if (!response.ok) throw new Error("GST provider lookup failed.");
+  const providerResult = await response.json();
+  const result = providerResult.data || providerResult.result || providerResult;
+  if (!result || typeof result !== "object") throw new Error("GST provider returned an unreadable record.");
+  return { provider: "custom", result };
 }
 
 function paymentService(service) {
@@ -1577,23 +1644,13 @@ async function api(req, res, pathname) {
     const payload = await readBody(req);
     const gstNumber = String(payload.gstNumber || "").trim().toUpperCase();
     if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstNumber)) return json(res, 422, { error: "Enter a valid 15-character GSTIN." });
-    if (GST_API_URL && GST_API_KEY) {
-      let providerUrl;
-      if (GST_API_URL.includes("{gstin}")) {
-        providerUrl = GST_API_URL.replace("{gstin}", encodeURIComponent(gstNumber));
-      } else {
-        const url = new URL(GST_API_URL);
-        url.searchParams.set("gstin", gstNumber);
-        providerUrl = url.toString();
+    if (gstLookupConfigured()) {
+      try {
+        const lookup = await lookupGstin(gstNumber);
+        return json(res, 200, { ok: true, mode: "provider", provider: lookup.provider, result: lookup.result });
+      } catch (error) {
+        return json(res, 502, { error: error.message || "GST provider lookup failed." });
       }
-      const response = await fetch(providerUrl, {
-        headers: { [GST_API_KEY_HEADER]: `${GST_API_KEY_PREFIX}${GST_API_KEY}` }
-      });
-      if (!response.ok) return json(res, 502, { error: "GST provider lookup failed." });
-      const providerResult = await response.json();
-      const result = providerResult.data || providerResult.result || providerResult;
-      if (!result || typeof result !== "object") return json(res, 502, { error: "GST provider returned an unreadable record." });
-      return json(res, 200, { ok: true, mode: "provider", result });
     }
     return json(res, 503, { error: "Automatic GST lookup is not connected yet. Enter the business details manually." });
   }

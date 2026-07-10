@@ -17,3 +17,9 @@ services:
         sync: false
       - key: SESSION_SECRET
         sync: false
+      - key: GST_PROVIDER
+        value: sandbox
+      - key: GST_SANDBOX_API_KEY
+        sync: false
+      - key: GST_SANDBOX_API_SECRET
+        sync: false
