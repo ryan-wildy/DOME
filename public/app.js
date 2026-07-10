@@ -11,6 +11,8 @@ const state = {
   profile: null,
   gstLookup: null,
   gstLookupTarget: "",
+  gstLookupStatus: "idle",
+  gstLookupRequest: 0,
   loginMode: "phone",
   identity: {
     phone: "",
@@ -39,6 +41,7 @@ const state = {
   },
   revealedContacts: {},
   authorizationRequests: [],
+  profileDraft: null,
   productDraftRows: null
 };
 
@@ -142,7 +145,7 @@ function pickGstValue(result, keys) {
   return "";
 }
 
-function applyGstLookupToForm(form, result) {
+function gstProfileValues(result, existing = {}) {
   const tradeName = pickGstValue(result, ["tradeName", "tradeNam", "trade_name", "businessName"]);
   const legalName = pickGstValue(result, ["legalName", "legalNam", "lgnm"]);
   const businessName = tradeName || legalName;
@@ -154,18 +157,57 @@ function applyGstLookupToForm(form, result) {
   const constitution = pickGstValue(result, ["constitution", "constitutionOfBusiness", "ctb"]);
   const status = pickGstValue(result, ["status", "gstStatus", "sts"]);
   const contactPerson = pickGstValue(result, ["contactPerson", "authorizedSignatory", "authorisedSignatory", "proprietorName"]);
-  if (form.elements.businessName && businessName) form.elements.businessName.value = businessName;
-  if (form.elements.state && gstState) form.elements.state.value = gstState;
-  if (form.elements.city && city) form.elements.city.value = city;
-  if (form.elements.contactPerson && contactPerson && !form.elements.contactPerson.value) form.elements.contactPerson.value = contactPerson;
-  if (form.elements.about && !form.elements.about.value && (businessName || address || nature)) {
+  let about = existing.about || "";
+  if (!about && (businessName || address || nature)) {
     const identity = [constitution, nature ? `engaged in ${nature}` : ""].filter(Boolean).join(" business ");
     const location = [city, gstState].filter(Boolean).join(", ");
-    form.elements.about.value = [
+    about = [
       `${businessName || "The organization"} is a ${identity || "GST-registered business"}${location ? ` based in ${location}` : ""}.`,
       address ? `Registered business address: ${address}.` : "",
       status ? `GST status: ${status}.` : ""
     ].filter(Boolean).join(" ");
+  }
+  return {
+    businessName: businessName || existing.businessName || "",
+    state: gstState || existing.state || "",
+    city: city || existing.city || "",
+    contactPerson: contactPerson || existing.contactPerson || "",
+    about
+  };
+}
+
+function applyGstLookupToForm(form, result) {
+  const values = gstProfileValues(result, formPayload(form));
+  for (const [field, value] of Object.entries(values)) {
+    if (form.elements[field] && value) form.elements[field].value = value;
+  }
+}
+
+async function lookupGstNumber(gstNumber, force = false) {
+  const normalized = String(gstNumber || "").trim().toUpperCase();
+  if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(normalized)) return;
+  if (!force && state.gstLookupTarget === normalized && state.gstLookup) return;
+  state.gstLookupStatus = "loading";
+  state.gstLookupTarget = normalized;
+  const requestId = ++state.gstLookupRequest;
+  render();
+  try {
+    const lookup = await api("/api/gst/lookup", { method: "POST", body: JSON.stringify({ gstNumber: normalized }) });
+    if (requestId !== state.gstLookupRequest) return;
+    const base = state.profileDraft || state.profile || {};
+    state.gstLookup = lookup;
+    state.gstLookupStatus = "verified";
+    state.profileDraft = { ...base, ...gstProfileValues(lookup.result || {}, base), gstNumber: normalized };
+    render();
+    const gstName = pickGstValue(lookup.result, ["tradeName", "tradeNam", "legalName", "lgnm"]);
+    notice(`GST verified${gstName ? ` for ${gstName}` : ""}. Continue with the ${state.profileDraft.role || "business"} details below.`, "success", "#gstLookupNotice");
+  } catch (error) {
+    if (requestId !== state.gstLookupRequest) return;
+    state.gstLookup = null;
+    state.gstLookupStatus = "error";
+    render();
+    notice(error.message, "error", "#gstLookupNotice");
+    document.querySelector("[data-gst-auto]")?.focus();
   }
 }
 
@@ -1083,40 +1125,61 @@ function dashboardPage() {
 
 function profileSetupPage() {
   if (!state.user) return loginPage();
-  const role = state.profile?.role || (state.user.role === "OEM" ? "OEM" : state.user.role === "Buyer" ? "Buyer" : "Reseller");
+  const draft = state.profileDraft || state.profile || {};
+  const role = draft.role || (state.user.role === "OEM" ? "OEM" : state.user.role === "Buyer" ? "Buyer" : "Reseller");
   const isOem = role === "OEM";
-  const plan = isOem ? currentOemPlan(state.profile || {}) : null;
+  const needsGst = role === "OEM" || role === "Reseller";
+  const plan = isOem ? currentOemPlan(state.profile || draft) : null;
   const plans = oemPlans();
-  const savedProducts = state.profile?.products || [];
+  const savedProducts = draft.products || state.profile?.products || [];
   const productRows = productEditorRows(savedProducts);
   const productLimit = plan?.productLimit || plans.basic?.productLimit || 3;
   const gstAutoEnabled = state.boot.config.gstLookupMode === "provider";
+  const draftGst = String(draft.gstNumber || "").toUpperCase();
+  const lookupGst = pickGstValue(state.gstLookup?.result, ["gstin", "gstNumber"]);
+  const gstVerified = Boolean(state.gstLookup && state.gstLookupStatus === "verified" && (!lookupGst || lookupGst === draftGst));
+  const hasSavedProfile = Boolean(state.profile?.completion);
+  const showDetails = !needsGst || !gstAutoEnabled || gstVerified || hasSavedProfile;
+  const lookingForCategories = Array.isArray(draft.lookingForCategories) ? draft.lookingForCategories.join(", ") : String(draft.lookingForCategories || "");
+  const contactList = Array.isArray(draft.contactList)
+    ? draft.contactList.map((item) => [item.purpose, item.name, item.phone, item.email].filter(Boolean).join(" | ")).join("\n")
+    : String(draft.contactList || "");
   return shell(`
     <main class="page">
       <header class="page-head">
         <p class="eyebrow">Profile setup</p>
         <h1>Complete your ${escapeHtml(role)} profile.</h1>
-        <p>Business details live here, not in registration. This keeps signup fast while still giving Dome the data needed for verification, matching and paid discovery.</p>
+        <p>Choose your role and verify the GST-registered business first. Dome then opens the fields relevant to that profile.</p>
       </header>
       <div class="container split">
-        <form class="card" id="profileForm">
+        <form class="card profile-form" id="profileForm">
           <div id="formNotice"></div>
-          <div class="form-grid">
-            <label><span class="label">I am joining as</span><select class="select" name="role" data-profile-role>
-              ${["Reseller", "OEM", "Buyer"].map((item) => `<option ${item === role ? "selected" : ""}>${item}</option>`).join("")}
-            </select></label>
-            <label><span class="label">Business / organization name</span><input class="input" name="businessName" required value="${escapeHtml(state.profile?.businessName || "")}"></label>
-            <label><span class="label">GST Number</span><input class="input" name="gstNumber" maxlength="15" ${gstAutoEnabled ? "data-gst-auto" : ""} value="${escapeHtml(state.profile?.gstNumber || "")}"><span id="gstLookupNotice" class="field-note" aria-live="polite">${gstAutoEnabled ? "" : "Automatic lookup is not connected. Enter the registered details manually."}</span></label>
-            <label><span class="label">Orders completed on GeM</span><input class="input" name="ordersCompleted" type="number" min="0" value="${escapeHtml(state.profile?.ordersCompleted || "")}"></label>
-            <label><span class="label">State</span><input class="input" name="state" value="${escapeHtml(state.profile?.state || "")}"></label>
-            <label><span class="label">City</span><input class="input" name="city" value="${escapeHtml(state.profile?.city || "")}"></label>
-            <label><span class="label">Contact person</span><input class="input" name="contactPerson" value="${escapeHtml(state.profile?.contactPerson || "")}"></label>
+          <section class="profile-gate">
+            <div class="profile-step-head"><span class="step-dot">1</span><div><h2>Choose your role</h2><p>This controls the profile fields and dashboard you receive.</p></div></div>
+            <div class="role-picker" role="radiogroup" aria-label="Dome role">
+              ${[
+                ["Reseller", "Find OEMs and request authorization"],
+                ["OEM", "Publish products and grow a reseller network"],
+                ["Buyer", "Discover suppliers and product coverage"]
+              ].map(([item, description]) => `<label class="role-option ${item === role ? "active" : ""}"><input type="radio" name="role" value="${item}" data-profile-role ${item === role ? "checked" : ""}><span><strong>${item}</strong><small>${description}</small></span></label>`).join("")}
+            </div>
+            <div class="gst-priority">
+              <div class="profile-step-head"><span class="step-dot">2</span><div><h2>${needsGst ? "Verify the business GSTIN" : "Add a GSTIN, if applicable"}</h2><p>${needsGst ? "The remaining business profile opens after Dome confirms this record." : "Buyer profiles can continue without GST verification."}</p></div></div>
+              <label><span class="label">GST Number${needsGst ? "" : " (optional)"}</span><input class="input gst-input" name="gstNumber" maxlength="15" ${needsGst ? "required" : ""} ${gstAutoEnabled ? "data-gst-auto" : ""} value="${escapeHtml(draftGst)}" placeholder="15-character GSTIN"><span id="gstLookupNotice" class="field-note" aria-live="polite">${state.gstLookupStatus === "loading" ? "Checking GST registration..." : gstVerified ? "GST record verified." : gstAutoEnabled ? "Enter all 15 characters to verify automatically." : "Automatic lookup is not connected. Enter the registered details manually."}</span></label>
+            </div>
+          </section>
+          ${showDetails ? `<section class="profile-details"><div class="profile-step-head"><span class="step-dot">3</span><div><h2>${escapeHtml(role)} details</h2><p>Your verified business information and role-specific operating details.</p></div></div><div class="form-grid">
+            <label><span class="label">Business / organization name</span><input class="input" name="businessName" required value="${escapeHtml(draft.businessName || "")}"></label>
+            <label><span class="label">Orders completed on GeM</span><input class="input" name="ordersCompleted" type="number" min="0" value="${escapeHtml(draft.ordersCompleted || "")}"></label>
+            <label><span class="label">State</span><input class="input" name="state" value="${escapeHtml(draft.state || "")}"></label>
+            <label><span class="label">City</span><input class="input" name="city" value="${escapeHtml(draft.city || "")}"></label>
+            <label><span class="label">Contact person</span><input class="input" name="contactPerson" value="${escapeHtml(draft.contactPerson || "")}"></label>
             ${role === "Reseller" ? `
-              <label><span class="label">GeM seller ID</span><input class="input" name="gemSellerId" value="${escapeHtml(state.profile?.gemSellerId || "")}"></label>
-              <label class="full"><span class="label">OEM categories looking for</span><input class="input" name="lookingForCategories" placeholder="Printer Cartridges, IT Hardware" value="${escapeHtml((state.profile?.lookingForCategories || []).join(", "))}"></label>
+              <label><span class="label">GeM seller ID</span><input class="input" name="gemSellerId" value="${escapeHtml(draft.gemSellerId || "")}"></label>
+              <label class="full"><span class="label">OEM categories looking for</span><input class="input" name="lookingForCategories" placeholder="Printer Cartridges, IT Hardware" value="${escapeHtml(lookingForCategories)}"></label>
             ` : ""}
             ${role === "OEM" ? `
-              <label><span class="label">GeM listing/profile link</span><input class="input" name="gemLink" type="url" value="${escapeHtml(state.profile?.gemLink || "")}"></label>
+              <label><span class="label">GeM listing/profile link</span><input class="input" name="gemLink" type="url" value="${escapeHtml(draft.gemLink || "")}"></label>
               <div class="full product-editor">
                 <div class="section-head compact">
                   <div>
@@ -1136,12 +1199,12 @@ function profileSetupPage() {
                   `).join("")}
                 </div>
               </div>
-              <label class="full"><span class="label">Contact list</span><textarea class="textarea" name="contactList" placeholder="Purpose | Name | Phone | Email">${escapeHtml((state.profile?.contactList || []).map((item) => [item.purpose, item.name, item.phone, item.email].filter(Boolean).join(" | ")).join("\n"))}</textarea></label>
+              <label class="full"><span class="label">Contact list</span><textarea class="textarea" name="contactList" placeholder="Purpose | Name | Phone | Email">${escapeHtml(contactList)}</textarea></label>
             ` : ""}
-            <label class="full"><span class="label">About the business</span><textarea class="textarea" name="about">${escapeHtml(state.profile?.about || "")}</textarea></label>
-          </div>
+            <label class="full"><span class="label">About the business</span><textarea class="textarea" name="about">${escapeHtml(draft.about || "")}</textarea></label>
+          </div></section>` : `<div class="gst-gate-placeholder"><strong>Verify the GSTIN to continue</strong><p>Dome will use the confirmed registration record to start the ${escapeHtml(role)} profile.</p></div>`}
           <div class="form-actions">
-            <button class="button" type="submit">Save profile</button>
+            ${showDetails ? `<button class="button" type="submit">Save profile</button>` : ""}
           </div>
         </form>
         <aside class="grid">
@@ -1152,7 +1215,7 @@ function profileSetupPage() {
           <div class="card">
             <h2>GST verification</h2>
             <p>${gstAutoEnabled ? "Enter a valid GSTIN and Dome will fill only the business fields returned by the connected GST provider." : "No GST provider is connected, so Dome will not guess or fabricate business information. Enter the details exactly as they appear on the GST registration."}</p>
-            ${state.gstLookup ? `
+            ${gstVerified ? `
               <div class="notice success gst-summary">
                 <strong>${escapeHtml(pickGstValue(state.gstLookup.result, ["tradeName", "tradeNam", "legalName", "lgnm"]))}</strong>
                 <span>${escapeHtml(pickGstValue(state.gstLookup.result, ["status", "gstStatus", "sts"]) || "Record found")}</span>
@@ -1396,6 +1459,7 @@ async function onSubmit(event) {
       const result = await api("/api/profile", { method: "POST", body: JSON.stringify(payload) });
       state.user = result.user;
       state.profile = result.profile;
+      state.profileDraft = null;
       state.productDraftRows = null;
       localStorage.setItem("domeUser", JSON.stringify(result.user));
       const returnTo = localStorage.getItem("domePostProfileRoute") || "";
@@ -1449,9 +1513,18 @@ async function handleClick(event) {
     state.profile = null;
     state.revealedContacts = {};
     state.authorizationRequests = [];
+    state.profileDraft = null;
     state.productDraftRows = null;
+    state.gstLookup = null;
+    state.gstLookupTarget = "";
+    state.gstLookupStatus = "idle";
+    state.gstLookupRequest += 1;
     resetLoginIdentity();
+    state.route = "/";
     setRoute("/");
+    render();
+    scrollTo({ top: 0, behavior: "instant" });
+    return;
   }
   const modeButton = event.target.closest("[data-login-mode]");
   if (modeButton) {
@@ -1559,7 +1632,9 @@ async function handleClick(event) {
   }
   if (action === "add-product-row") {
     const form = document.querySelector("#profileForm");
-    state.productDraftRows = [...productRowsFromForm(form), { name: "", gemUrl: "", category: "" }];
+    const products = productRowsFromForm(form);
+    state.profileDraft = { ...(state.profileDraft || state.profile || {}), ...formPayload(form), products };
+    state.productDraftRows = [...products, { name: "", gemUrl: "", category: "" }];
     render();
     return;
   }
@@ -1568,6 +1643,7 @@ async function handleClick(event) {
     const index = Number(event.target.closest("[data-product-index]")?.dataset.productIndex || 0);
     const rows = productRowsFromForm(form);
     rows.splice(index, 1);
+    state.profileDraft = { ...(state.profileDraft || state.profile || {}), ...formPayload(form), products: rows };
     state.productDraftRows = rows.length ? rows : [{ name: "", gemUrl: "", category: "" }];
     render();
     return;
@@ -1717,30 +1793,43 @@ function handleInput(event) {
   }
 
   if (event.target.matches("[data-profile-role]")) {
-    state.profile = { ...(state.profile || {}), role: event.target.value };
-    state.productDraftRows = null;
+    const form = event.target.closest("#profileForm");
+    const hasProductEditor = Boolean(form?.querySelector("[data-product-row]"));
+    const products = hasProductEditor ? productRowsFromForm(form) : (state.profileDraft?.products || state.profile?.products || []);
+    const current = form ? formPayload(form) : {};
+    state.profileDraft = { ...(state.profileDraft || state.profile || {}), ...current, role: event.target.value, products };
+    const gstNumber = String(state.profileDraft.gstNumber || "").toUpperCase();
+    state.gstLookup = null;
+    state.gstLookupTarget = "";
+    state.gstLookupStatus = "idle";
+    state.gstLookupRequest += 1;
     render();
+    if (event.target.value !== "Buyer" && state.boot.config.gstLookupMode === "provider" && /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstNumber)) {
+      void lookupGstNumber(gstNumber, true);
+    }
     return;
   }
   if (event.target.matches("[data-gst-auto]")) {
     const input = event.target;
     input.value = input.value.toUpperCase();
     const gstNumber = input.value.trim();
+    const form = input.closest("#profileForm");
+    if (form) state.profileDraft = { ...(state.profileDraft || state.profile || {}), ...formPayload(form), gstNumber };
     if (gstLookupTimer) clearTimeout(gstLookupTimer);
-    if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstNumber) || state.gstLookupTarget === gstNumber) return;
-    gstLookupTimer = setTimeout(async () => {
-      const form = document.querySelector("#profileForm");
-      if (!form || form.elements.gstNumber.value.trim().toUpperCase() !== gstNumber) return;
-      try {
-        state.gstLookupTarget = gstNumber;
-        state.gstLookup = await api("/api/gst/lookup", { method: "POST", body: JSON.stringify({ gstNumber }) });
-        applyGstLookupToForm(form, state.gstLookup.result || {});
-        const gstName = pickGstValue(state.gstLookup.result, ["tradeName", "tradeNam", "legalName", "lgnm"]);
-        notice(`GST details found${gstName ? ` for ${gstName}` : ""}. Business fields have been filled where available.`, "success", "#gstLookupNotice");
-      } catch (error) {
-        notice(error.message, "error", "#gstLookupNotice");
-      }
-    }, 450);
+    if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstNumber)) {
+      state.gstLookup = null;
+      state.gstLookupStatus = "idle";
+      state.gstLookupRequest += 1;
+      const target = document.querySelector("#gstLookupNotice");
+      if (target) target.textContent = "Enter all 15 characters to verify automatically.";
+      return;
+    }
+    if (state.gstLookupTarget === gstNumber && state.gstLookup) return;
+    gstLookupTimer = setTimeout(() => void lookupGstNumber(gstNumber), 450);
+  }
+  const profileForm = event.target.closest("#profileForm");
+  if (profileForm && !event.target.matches("[data-profile-role], [data-gst-auto]")) {
+    state.profileDraft = { ...(state.profileDraft || state.profile || {}), ...formPayload(profileForm) };
   }
   const filter = event.target.dataset.filter;
   if (filter) {
