@@ -20,6 +20,10 @@ const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || "";
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || "";
 const DOME_PLUS_PRICE = Number(process.env.DOME_PLUS_PRICE || 4999);
 const DOME_PLUS_DAYS = Number(process.env.DOME_PLUS_DAYS || 365);
+const GST_API_URL = process.env.GST_API_URL || "";
+const GST_API_KEY = process.env.GST_API_KEY || "";
+const GST_API_KEY_HEADER = process.env.GST_API_KEY_HEADER || "authorization";
+const GST_API_KEY_PREFIX = process.env.GST_API_KEY_PREFIX ?? "Bearer ";
 const OEM_PLANS = {
   basic: {
     id: "basic",
@@ -510,6 +514,7 @@ async function seedDb() {
 }
 
 function migrateDb(db) {
+  db.businesses ||= [];
   db.users ||= [];
   db.applications ||= [];
   db.contacts ||= [];
@@ -539,12 +544,28 @@ function migrateDb(db) {
     if (app.role === "Vendor") app.role = "Reseller";
   }
   for (const profile of db.businessProfiles) {
+    const hasDemoGstData = profile.gstLookup?.mode === "demo"
+      || profile.gstLookup?.result?.tradeName === "Dome Demo Seller"
+      || profile.gstLookup?.result?.legalName === "Demo GST verified business";
+    if (hasDemoGstData) {
+      if (["Dome Demo Seller", "Demo GST verified business"].includes(profile.businessName)) profile.businessName = "";
+      if (profile.contactPerson === "Demo Authorised Signatory") profile.contactPerson = "";
+      if (String(profile.about || "").startsWith("Dome Demo Seller is a Proprietorship business")) profile.about = "";
+      profile.gstLookup = null;
+      const profileUser = db.users.find((user) => user.id === profile.userId || user.email === profile.userEmail);
+      if (profileUser && ["Dome Demo Seller", "Demo GST verified business"].includes(profileUser.businessName)) {
+        profileUser.businessName = "Profile pending";
+        profileUser.businessId = "";
+        profileUser.profileComplete = false;
+      }
+    }
     if (profile.role === "OEM") {
       if (profile.micrositePaidUntil && !profile.domePlusPaidUntil) profile.domePlusPaidUntil = profile.micrositePaidUntil;
       profile.oemPlan = profile.domePlusPaidUntil ? "domePlus" : (profile.oemPlan || "basic");
       profile.products = normalizeProducts(profile.products);
     }
   }
+  db.businesses = db.businesses.filter((business) => !["Dome Demo Seller", "Demo GST verified business"].includes(business.name));
   for (const business of db.businesses) {
     if (business.type === "OEM") {
       business.oemPlan ||= business.id === "printodome" ? "domePlus" : "basic";
@@ -590,7 +611,7 @@ function publicBootstrap(db) {
       paymentMode: paymentMode(),
       razorpayKeyId: RAZORPAY_KEY_ID,
       oemPlans: OEM_PLANS,
-      gstLookupMode: process.env.GST_API_URL ? "provider" : "demo"
+      gstLookupMode: GST_API_URL && GST_API_KEY ? "provider" : "manual"
     },
     counts: {
       applications: db.applications.length,
@@ -1081,12 +1102,17 @@ function otpTarget(payload) {
 }
 
 function hasVerifiedOtp(db, target, channel, purpose = "registration") {
+  const acceptedPurposes = purpose === "registration"
+    ? ["registration", "access"]
+    : purpose === "login"
+      ? ["login", "access"]
+      : [purpose];
   return db.otps.some((entry) => {
     const entryTarget = entry.target || entry.phone;
     return entryTarget === target
       && entry.channel === channel
       && entry.verified
-      && (!entry.purpose || entry.purpose === purpose)
+      && (!entry.purpose || acceptedPurposes.includes(entry.purpose))
       && new Date(entry.expiresAt).getTime() > Date.now();
   });
 }
@@ -1274,13 +1300,36 @@ async function api(req, res, pathname) {
       phone: normalizePhone(liveUser.phone),
       category: String(payload.category).trim(),
       status: "Requested",
-      timeline: [{ stage: "Requested", at: new Date().toISOString(), by: "Reseller" }, { stage: "Dome review", at: new Date().toISOString(), by: "Dome" }],
+      timeline: [{ stage: "Requested", at: new Date().toISOString(), by: "Reseller" }, { stage: "OEM review", at: new Date().toISOString(), by: oem.name }],
       createdAt: new Date().toISOString()
     };
     db.authorizationRequests.unshift(request);
     addAudit(db, "system", "authorization_requested", `${request.vendorName} -> ${oem.name}`);
     await saveDb();
     return json(res, 201, { ok: true, request });
+  }
+
+  const authorizationStatusMatch = pathname.match(/^\/api\/authorization\/([^/]+)\/status$/);
+  if (req.method === "POST" && authorizationStatusMatch) {
+    if (!tokenUser) return json(res, 401, { error: "Sign in required." });
+    const liveUser = db.users.find((user) => user.id === tokenUser.id);
+    if (!liveUser) return json(res, 401, { error: "Session user not found." });
+    if (liveUser.role !== "OEM" || !liveUser.businessId) return json(res, 403, { error: "Only the requested OEM can update this authorization request." });
+    const request = db.authorizationRequests.find((item) => item.id === authorizationStatusMatch[1]);
+    if (!request) return json(res, 404, { error: "Authorization request not found." });
+    if (request.oemId !== liveUser.businessId) return json(res, 403, { error: "This request belongs to another OEM." });
+    const payload = await readBody(req);
+    const status = String(payload.status || "");
+    if (!["Accepted", "Declined"].includes(status)) return json(res, 422, { error: "Choose Accepted or Declined." });
+    request.status = status;
+    request.updatedAt = new Date().toISOString();
+    request.timeline ||= [];
+    request.timeline.push({ stage: status, at: request.updatedAt, by: liveUser.businessName || "OEM" });
+    if (status === "Accepted") request.acceptedAt = request.updatedAt;
+    if (status === "Declined") request.declinedAt = request.updatedAt;
+    addAudit(db, liveUser.email, `authorization_${status.toLowerCase()}`, `${request.vendorName} -> ${request.oemName}`);
+    await saveDb();
+    return json(res, 200, { ok: true, request });
   }
 
   if (req.method === "POST" && pathname === "/api/setup-request") {
@@ -1528,34 +1577,25 @@ async function api(req, res, pathname) {
     const payload = await readBody(req);
     const gstNumber = String(payload.gstNumber || "").trim().toUpperCase();
     if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstNumber)) return json(res, 422, { error: "Enter a valid 15-character GSTIN." });
-    if (process.env.GST_API_URL && process.env.GST_API_KEY) {
-      const response = await fetch(`${process.env.GST_API_URL}?gstin=${encodeURIComponent(gstNumber)}`, {
-        headers: { authorization: `Bearer ${process.env.GST_API_KEY}` }
+    if (GST_API_URL && GST_API_KEY) {
+      let providerUrl;
+      if (GST_API_URL.includes("{gstin}")) {
+        providerUrl = GST_API_URL.replace("{gstin}", encodeURIComponent(gstNumber));
+      } else {
+        const url = new URL(GST_API_URL);
+        url.searchParams.set("gstin", gstNumber);
+        providerUrl = url.toString();
+      }
+      const response = await fetch(providerUrl, {
+        headers: { [GST_API_KEY_HEADER]: `${GST_API_KEY_PREFIX}${GST_API_KEY}` }
       });
       if (!response.ok) return json(res, 502, { error: "GST provider lookup failed." });
       const providerResult = await response.json();
-      return json(res, 200, { ok: true, mode: "provider", result: providerResult.data || providerResult.result || providerResult });
+      const result = providerResult.data || providerResult.result || providerResult;
+      if (!result || typeof result !== "object") return json(res, 502, { error: "GST provider returned an unreadable record." });
+      return json(res, 200, { ok: true, mode: "provider", result });
     }
-    return json(res, 200, {
-      ok: true,
-      mode: "demo",
-      result: {
-        gstNumber,
-        legalName: "Demo GST verified business",
-        tradeName: "Dome Demo Seller",
-        stateCode: gstNumber.slice(0, 2),
-        stateName: "Delhi",
-        city: "New Delhi",
-        address: "Demo Business Park, Connaught Place, New Delhi",
-        registrationDate: "2019-04-01",
-        taxpayerType: "Regular",
-        contactPerson: "Demo Authorised Signatory",
-        constitution: "Proprietorship",
-        natureOfBusiness: "Retail and wholesale supply",
-        status: "Active",
-        note: "Demo data. Connect a GST API provider before relying on this for verification."
-      }
-    });
+    return json(res, 503, { error: "Automatic GST lookup is not connected yet. Enter the business details manually." });
   }
 
   if (req.method === "POST" && pathname === "/api/reveal-contact") {

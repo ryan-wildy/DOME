@@ -477,6 +477,15 @@ button {
   color: var(--ink);
   padding: 12px 13px;
   min-height: 44px;
+  scroll-margin-top: 120px;
+}
+
+.input.field-invalid,
+.select.field-invalid,
+.textarea.field-invalid,
+input[type="checkbox"].field-invalid {
+  outline: 3px solid rgba(177, 63, 50, 0.18);
+  border-color: var(--red);
 }
 
 .textarea {
@@ -744,6 +753,22 @@ button {
 
 .step-notice .notice {
   margin: 12px 0 0;
+}
+
+.auto-verify-hint {
+  margin: 10px 0 0;
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.consent-fields {
+  margin-top: 18px;
+}
+
+.verified-identity {
+  border-color: #87c9aa;
+  background: #effbf5;
 }
 
 .field-note {

@@ -50,7 +50,7 @@ For the India launch workflow, this build is prepared for:
 - Phone OTP: MSG91 first choice for India/DLT workflows, Twilio as fallback.
 - Email OTP: Resend for quick setup, SendGrid as fallback.
 - Payments: Razorpay for the Rs 500 / 5 OEM authorization-request bundle and paid OEM microsites.
-- GST lookup: connect a GST/GSP provider behind `GST_API_URL`; Dome maps common legal name, trade name, status, constitution, registration date, business nature and principal-address fields when the provider returns them. GST search data usually does not include a public contact person, so that field remains member-entered unless the provider explicitly supplies an authorized signatory.
+- GST lookup: connect a GST/GSP provider behind `GST_API_URL`; Dome maps common legal name, trade name, status, constitution, registration date, business nature and principal-address fields when the provider returns them. Without a provider, lookup stays disabled and members enter the details manually. Dome never substitutes sample business data for a real GSTIN.
 
 Supported environment variables:
 
@@ -70,6 +70,8 @@ EMAIL_FROM="Dome <verify@yourdomain.com>"
 # GST lookup
 GST_API_URL=
 GST_API_KEY=
+GST_API_KEY_HEADER=authorization
+GST_API_KEY_PREFIX="Bearer "
 
 # Payments
 PAYMENT_MODE=mock
@@ -98,3 +100,5 @@ TWILIO_FROM=
 ```
 
 For India production, replace this with the final DLT-compliant SMS/WhatsApp provider selected by PrintoDome.
+
+`GST_API_URL` may be a base endpoint, in which case Dome adds a `gstin` query parameter, or it may contain a `{gstin}` placeholder. `GST_API_KEY_HEADER` and `GST_API_KEY_PREFIX` allow the provider's authentication convention to be configured without code changes.

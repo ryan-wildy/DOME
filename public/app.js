@@ -22,7 +22,21 @@ const state = {
     phoneVerified: false,
     emailVerified: false
   },
-  loginIdentity: { phone: "", email: "", phoneOtp: "", emailOtp: "", phoneCodeSent: false, emailCodeSent: false },
+  loginIdentity: {
+    phone: "",
+    email: "",
+    phoneOtp: "",
+    emailOtp: "",
+    phoneCodeSent: false,
+    emailCodeSent: false,
+    phoneVerified: false,
+    emailVerified: false,
+    phoneVerifying: false,
+    emailVerifying: false,
+    needsRegistration: false,
+    consent: false,
+    marketingConsent: false
+  },
   revealedContacts: {},
   authorizationRequests: [],
   productDraftRows: null
@@ -223,6 +237,140 @@ function setRoute(route) {
   location.hash = route;
 }
 
+function resetLoginIdentity() {
+  state.loginIdentity = {
+    phone: "", email: "", phoneOtp: "", emailOtp: "",
+    phoneCodeSent: false, emailCodeSent: false,
+    phoneVerified: false, emailVerified: false,
+    phoneVerifying: false, emailVerifying: false,
+    needsRegistration: false, consent: false, marketingConsent: false
+  };
+}
+
+function routeParameter(name) {
+  const query = state.route.split("?")[1] || "";
+  return new URLSearchParams(query).get(name) || "";
+}
+
+function safeReturnRoute() {
+  const route = routeParameter("next");
+  return route.startsWith("/") && !route.startsWith("//") ? route : "";
+}
+
+function storeSession(result) {
+  state.user = result.user;
+  state.profile = result.profile || null;
+  state.revealedContacts = Object.fromEntries((result.revealedContacts || []).map((item) => [item.businessId, item]));
+  state.authorizationRequests = result.authorizationRequests || [];
+  state.token = result.token;
+  localStorage.setItem("domeUser", JSON.stringify(result.user));
+  localStorage.setItem("domeToken", result.token);
+}
+
+function continueAfterLogin(result) {
+  storeSession(result);
+  const next = safeReturnRoute();
+  setRoute(result.user.role === "Admin" ? "/admin" : next || "/dashboard");
+}
+
+async function createAccountFromLogin() {
+  if (!state.loginIdentity.emailVerified) return;
+  if (!state.loginIdentity.consent) {
+    notice("Accept the Terms and Privacy Policy to create your account.", "error", "#loginCodeNotice");
+    focusFirstInvalid(document.querySelector("#loginForm"));
+    return;
+  }
+  try {
+    const result = await api("/api/register", {
+      method: "POST",
+      body: JSON.stringify({
+        phone: state.loginIdentity.phone,
+        email: state.loginIdentity.email,
+        consent: state.loginIdentity.consent,
+        marketingConsent: state.loginIdentity.marketingConsent
+      })
+    });
+    storeSession(result);
+    const next = safeReturnRoute();
+    if (next) localStorage.setItem("domePostProfileRoute", next);
+    setRoute("/profile-setup");
+  } catch (error) {
+    notice(error.message, "error", "#loginCodeNotice");
+  }
+}
+
+async function verifyRegistrationOtp(channel) {
+  const verifyingKey = `${channel}Verifying`;
+  const otpKey = `${channel}Otp`;
+  if (state.identity[verifyingKey] || state.identity[`${channel}Verified`]) return;
+  const code = state.identity[otpKey];
+  if (!/^\d{6}$/.test(code)) return;
+  state.identity[verifyingKey] = true;
+  notice("Checking code...", "", `#${channel}CodeNotice`);
+  try {
+    await api("/api/otp/verify", {
+      method: "POST",
+      body: JSON.stringify({ channel, [channel]: state.identity[channel], code })
+    });
+    state.identity[`${channel}Verified`] = true;
+    render();
+    notice(channel === "email" ? "Email verified." : "Mobile verified.", "success", `#${channel}CodeNotice`);
+  } catch (error) {
+    state.identity[otpKey] = "";
+    render();
+    notice(error.message, "error", `#${channel}CodeNotice`);
+    document.querySelector(`[data-otp-code="${channel}"]`)?.focus();
+  } finally {
+    state.identity[verifyingKey] = false;
+  }
+}
+
+async function verifyLoginOtp(channel) {
+  const verifyingKey = `${channel}Verifying`;
+  const otpKey = `${channel}Otp`;
+  if (state.loginIdentity[verifyingKey]) return;
+  const code = state.loginIdentity[otpKey];
+  if (!/^\d{6}$/.test(code)) return;
+  state.loginIdentity[verifyingKey] = true;
+  notice("Checking code...", "", "#loginCodeNotice");
+  try {
+    await api("/api/otp/verify", {
+      method: "POST",
+      body: JSON.stringify({ channel, [channel]: state.loginIdentity[channel], code })
+    });
+    state.loginIdentity[`${channel}Verified`] = true;
+
+    if (channel === "email" && state.loginIdentity.needsRegistration) {
+      render();
+      notice("Email verified. Your Dome account is ready to create.", "success", "#loginCodeNotice");
+      if (state.loginIdentity.consent) await createAccountFromLogin();
+      return;
+    }
+
+    const result = await api("/api/session/otp", {
+      method: "POST",
+      body: JSON.stringify({ channel, [channel]: state.loginIdentity[channel] })
+    });
+    continueAfterLogin(result);
+  } catch (error) {
+    if (channel === "phone" && error.status === 404 && state.loginIdentity.phoneVerified) {
+      state.loginIdentity.needsRegistration = true;
+      state.loginIdentity.email = "";
+      state.loginIdentity.emailOtp = "";
+      state.loginIdentity.emailCodeSent = false;
+      render();
+      notice("Mobile verified. Add and verify your email to create your Dome account.", "success", "#loginCodeNotice");
+      return;
+    }
+    state.loginIdentity[otpKey] = "";
+    render();
+    notice(error.message, "error", "#loginCodeNotice");
+    document.querySelector(`[data-login-otp="${channel}"]`)?.focus();
+  } finally {
+    state.loginIdentity[verifyingKey] = false;
+  }
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -263,7 +411,7 @@ function shell(content) {
             ${state.user?.role === "Admin" ? navLink("/admin", "Admin") : ""}
           </div>
           <div class="nav-actions">
-            ${state.user ? `<button class="button small secondary" data-action="logout">Log out</button>` : `<a class="nav-link" href="#/login">Log in</a><a class="button" href="#/register">Join Dome</a>`}
+            ${state.user ? `<button class="button small secondary" data-action="logout">Log out</button>` : `<a class="nav-link" href="#/login">Log in</a><a class="button" href="#/login">Join Dome</a>`}
           </div>
           <button class="menu-button" data-action="toggle-menu" aria-label="Menu">Menu</button>
         </nav>
@@ -273,7 +421,7 @@ function shell(content) {
           ${navLink("/directory", "OEMs/Resellers")}
           ${navLink("/learn", "Learn")}
           ${navLink("/webinars", "Webinars")}
-          ${state.user ? `${navLink("/dashboard", "Dashboard")}<button class="button small secondary" data-action="logout">Log out</button>` : `<a class="nav-link" href="#/login">Log in</a><a class="button" href="#/register">Join Dome</a>`}
+          ${state.user ? `${navLink("/dashboard", "Dashboard")}<button class="button small secondary" data-action="logout">Log out</button>` : `<a class="nav-link" href="#/login">Log in</a><a class="button" href="#/login">Join Dome</a>`}
           ${state.user?.role === "Admin" ? navLink("/admin", "Admin") : ""}
         </div>
       </header>
@@ -300,13 +448,13 @@ function footer() {
         <div>
           <strong>For Business</strong>
           <a href="#/directory?type=OEM">Discover OEMs</a>
-          <a href="#/register">Become a reseller</a>
-          <a href="#/register">List as an OEM</a>
+          <a href="#/login">Become a reseller</a>
+          <a href="#/login">List as an OEM</a>
         </div>
         <div>
           <strong>Dome</strong>
           <a href="#/dashboard">Member dashboard</a>
-          <a href="#/register">Verified signup</a>
+          <a href="#/login">Verified signup</a>
           <a href="#/about">How it works</a>
         </div>
       </div>
@@ -344,7 +492,7 @@ function homePage() {
           <h1>Build the partnerships behind every GeM opportunity.</h1>
           <p>Dome brings OEMs, resellers and buyers into one trusted network for discovery, authorization, product visibility and channel growth.</p>
           <div class="hero-actions">
-            <a class="button" href="#/register">Join Dome</a>
+            <a class="button" href="#/login">Join Dome</a>
             <a class="button secondary" href="#/directory">Explore OEMs/Resellers</a>
           </div>
           <div class="hero-stats" aria-label="Platform signals">
@@ -373,12 +521,12 @@ function homePage() {
             <article class="card">
               <h3>Grow as a Reseller</h3>
               <p>Find OEMs, request authorization, track the relationship and show Buyers which OEMs you represent.</p>
-              <a class="button secondary" href="#/register">Join as Reseller</a>
+              <a class="button secondary" href="#/login">Join as Reseller</a>
             </article>
             <article class="card">
               <h3>Enable as an OEM</h3>
               <p>Build a reseller network, share rate lists and sales kits, and make your catalogue visible to Resellers and Buyers.</p>
-              <a class="button secondary" href="#/register">List as OEM</a>
+              <a class="button secondary" href="#/login">List as OEM</a>
             </article>
           </div>
         </div>
@@ -458,7 +606,7 @@ function aboutPage() {
           <h2>Dome keeps the commercial journey connected while GeM remains the official marketplace.</h2>
           <p>Dome helps members prepare, learn, publish profiles, discover partners, exchange authorization context and track relationship progress. When a step becomes an official marketplace action - registration, catalogue submission, OEM verification on GeM, bidding, order acceptance, invoicing or another transaction - the member completes it on GeM.</p>
           <p>That boundary is a feature: Dome gives the network a dependable place to coordinate without confusing a business-enablement platform with the government marketplace itself.</p>
-          <div class="hero-actions"><a class="button" href="#/register">Join Dome</a><a class="button secondary" href="#/directory">Explore the network</a></div>
+          <div class="hero-actions"><a class="button" href="#/login">Join Dome</a><a class="button secondary" href="#/directory">Explore the network</a></div>
         </div>
       </section>
     </main>
@@ -532,13 +680,13 @@ function profilePage(id) {
             <div class="hero-actions">
               ${isOem && revealed ? `<a class="button" href="#/request-authorization/${business.id}">Request authorization</a>` : ""}
               ${isOem && !revealed && !isOwner && state.user ? `<button class="button secondary" data-action="reveal-contact" data-business-id="${business.id}">Start authorization request - ${money(state.boot.config.revealBundlePrice)} / ${state.boot.config.revealBundleCredits} OEMs</button>` : ""}
-              ${isOem && !revealed && !isOwner && !state.user ? `<a class="button secondary" href="#/login">Log in to request authorization</a><a class="button ghost" href="#/register">Join Dome</a>` : ""}
+              ${isOem && !revealed && !isOwner && !state.user ? `<a class="button" href="#/login?next=${encodeURIComponent(`/profile/${business.id}`)}">Request authorization through Dome</a>` : ""}
               ${isOem && isOwner ? `<a class="button secondary" href="#/profile-setup">Edit microsite</a>` : ""}
               ${!isOem ? `<a class="button secondary" href="#/contact/${business.id}">Send enquiry</a>` : ""}
             </div>
             <div id="revealNotice" class="profile-message">
-              ${isOem && !revealed && !isOwner ? `<p class="notice warn">${state.user ? "Start a paid authorization request. Dome will process it and route it to the OEM team." : "Please log in or register before requesting OEM authorization."}</p>` : ""}
-              ${isOem && revealed ? `<p class="notice success"><strong>Authorization form unlocked.</strong><br>Submit your request and Dome will process it for the OEM.</p>` : ""}
+              ${isOem && !revealed && !isOwner ? `<p class="notice warn">${state.user ? "Start a paid authorization request and send it directly to the OEM for review." : "Enter your mobile number to continue. Existing members sign in; new members create an account in the same flow."}</p>` : ""}
+              ${isOem && revealed ? `<p class="notice success"><strong>Authorization form unlocked.</strong><br>Submit your request directly to the OEM for approval.</p>` : ""}
             </div>
           </div>
           <div class="big-avatar">${escapeHtml(business.initials)}</div>
@@ -727,8 +875,8 @@ function registerPage() {
               </div>
               <div class="form-actions compact">
                 ${!state.identity.phoneVerified ? `<button class="button secondary" type="button" data-action="send-register-code" data-channel="phone">${phoneSent ? "Send again" : "Send code"}</button>` : `<span class="verified-label">Mobile verified</span>`}
-                ${phoneSent && !state.identity.phoneVerified ? `<button class="button" type="button" data-action="verify-register-code" data-channel="phone" data-verify-button disabled>Verify mobile</button>` : ""}
               </div>
+              ${phoneSent && !state.identity.phoneVerified ? `<p class="auto-verify-hint">The code is checked automatically when all 6 digits are entered.</p>` : ""}
               <div id="phoneCodeNotice" class="step-notice" aria-live="polite"></div>
             </section>
             <section class="verify-card ${state.identity.emailVerified ? "verified" : ""}">
@@ -742,8 +890,8 @@ function registerPage() {
               </div>
               <div class="form-actions compact">
                 ${!state.identity.emailVerified ? `<button class="button secondary" type="button" data-action="send-register-code" data-channel="email">${emailSent ? "Send again" : "Send code"}</button>` : `<span class="verified-label">Email verified</span>`}
-                ${emailSent && !state.identity.emailVerified ? `<button class="button" type="button" data-action="verify-register-code" data-channel="email" data-verify-button disabled>Verify email</button>` : ""}
               </div>
+              ${emailSent && !state.identity.emailVerified ? `<p class="auto-verify-hint">The code is checked automatically when all 6 digits are entered.</p>` : ""}
               <div id="emailCodeNotice" class="step-notice" aria-live="polite"></div>
             </section>
           </div>
@@ -772,21 +920,35 @@ function registerPage() {
 }
 
 function loginPage() {
-  const isPhone = state.loginMode === "phone";
-  const channel = isPhone ? "phone" : "email";
+  const isNewAccount = state.loginIdentity.needsRegistration;
+  const isPhone = !isNewAccount && state.loginMode === "phone";
+  const channel = isNewAccount ? "email" : isPhone ? "phone" : "email";
   const codeSent = state.loginIdentity[`${channel}CodeSent`];
   const isLocalDemo = ["localhost", "127.0.0.1"].includes(location.hostname);
   return shell(`
     <main class="page">
       <header class="page-head">
-        <p class="eyebrow">Member access</p>
-        <h1>Log in with a secure code.</h1>
-        <p>Access your Dome network, requests and business profile.</p>
+        <p class="eyebrow">${isNewAccount ? "Create your account" : "Enter Dome"}</p>
+        <h1>${isNewAccount ? "One more step to join Dome." : "Continue with your mobile number."}</h1>
+        <p>${isNewAccount ? "Your mobile number is verified. Add your email to finish creating your secure account." : "Existing members sign in automatically. New members continue into account setup without starting over."}</p>
       </header>
       <div class="container split">
         <form class="card" id="loginForm">
           <div id="formNotice"></div>
-          ${isPhone ? `
+          ${isNewAccount ? `
+            <div class="request-identity verified-identity">
+              <span class="step-dot">✓</span>
+              <div><strong>Mobile verified</strong><p>${escapeHtml(state.loginIdentity.phone)}</p></div>
+            </div>
+            <label><span class="label">Email address</span><input class="input" name="loginEmail" data-login-field="email" type="email" required value="${escapeHtml(state.loginIdentity.email)}" ${state.loginIdentity.emailVerified ? "readonly" : ""}></label>
+            ${codeSent && !state.loginIdentity.emailVerified ? `<label><span class="label">Verification code</span><input class="input otp-input" name="loginEmailOtp" data-login-otp="email" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="6 digits" value="${escapeHtml(state.loginIdentity.emailOtp)}" autofocus></label>` : ""}
+            ${!state.loginIdentity.emailVerified ? `<div class="form-actions"><button class="button secondary" type="button" data-action="send-login-code" data-channel="email">${codeSent ? "Send again" : "Send email code"}</button></div>` : `<p class="notice success">Email verified.</p>`}
+            <div class="form-grid consent-fields">
+              <label class="full"><input type="checkbox" name="consent" data-login-consent="consent" required ${state.loginIdentity.consent ? "checked" : ""}> I accept the Terms and Privacy Policy.</label>
+              <label class="full"><input type="checkbox" name="marketingConsent" data-login-consent="marketingConsent" ${state.loginIdentity.marketingConsent ? "checked" : ""}> Send me Dome learning and event updates.</label>
+            </div>
+            ${state.loginIdentity.emailVerified ? `<div class="form-actions"><button class="button" type="submit">Create account and continue</button></div>` : ""}
+          ` : isPhone ? `
             <label><span class="label">Mobile number</span><input class="input" name="loginPhone" data-login-field="phone" placeholder="+919000000001" required value="${escapeHtml(state.loginIdentity.phone)}"></label>
             ${codeSent ? `<label><span class="label">Verification code</span><input class="input otp-input" name="loginPhoneOtp" data-login-otp="phone" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="6 digits" value="${escapeHtml(state.loginIdentity.phoneOtp)}" autofocus></label>` : ""}
             <button class="link-button" type="button" data-login-mode="email">Log in another way</button>
@@ -795,10 +957,10 @@ function loginPage() {
             ${codeSent ? `<label><span class="label">Verification code</span><input class="input otp-input" name="loginEmailOtp" data-login-otp="email" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="6 digits" value="${escapeHtml(state.loginIdentity.emailOtp)}" autofocus></label>` : ""}
             <button class="link-button" type="button" data-login-mode="phone">Use mobile number</button>
           `}
-          <div class="form-actions">
+          ${!isNewAccount ? `<div class="form-actions">
             <button class="button secondary" type="button" data-action="send-login-code" data-channel="${channel}">${codeSent ? "Send again" : "Send code"}</button>
-            ${codeSent ? `<button class="button" type="button" data-action="verify-login-code" data-channel="${channel}" data-login-verify disabled>Verify and log in</button>` : ""}
-          </div>
+          </div>` : ""}
+          ${codeSent && !state.loginIdentity[`${channel}Verified`] ? `<p class="auto-verify-hint">The code is checked automatically when all 6 digits are entered.</p>` : ""}
           <div id="loginCodeNotice" class="step-notice" aria-live="polite"></div>
         </form>
         <aside class="grid">
@@ -813,7 +975,7 @@ function loginPage() {
             </div>
           </div>` : `<div class="card">
             <h2>Secure access</h2>
-            <p>Enter your registered mobile number to receive a login code. Use email only when mobile access is unavailable.</p>
+            <p>Enter your mobile number once. Dome will recognize an existing account or guide a new member through email verification.</p>
           </div>`}
         </aside>
       </div>
@@ -876,7 +1038,11 @@ function dashboardPage() {
                 <article class="card status-card">
                   <span class="tag dark">${escapeHtml(request.status)}</span>
                   <h3>${escapeHtml(request.oemName)}</h3>
-                  <p>${escapeHtml(request.category)} request submitted ${new Date(request.createdAt).toLocaleDateString()}.</p>
+                  <p>${request.status === "Accepted"
+                    ? `Accepted by the OEM for ${escapeHtml(request.category)}. Dome will add the contact-routing step once that workflow is finalized.`
+                    : request.status === "Declined"
+                      ? `The OEM declined this ${escapeHtml(request.category)} request. You can review the category fit before trying again.`
+                      : `${escapeHtml(request.category)} request submitted ${new Date(request.createdAt).toLocaleDateString()} and awaiting OEM review.`}</p>
                   <a class="inline-link" href="#/profile/${escapeHtml(request.oemId)}">Open OEM profile</a>
                 </article>
               `).join("")}</div>
@@ -899,7 +1065,13 @@ function dashboardPage() {
                   <span class="tag dark">${escapeHtml(request.status)}</span>
                   <h3>${escapeHtml(request.vendorName || "Dome reseller")}</h3>
                   <p><strong>${escapeHtml(request.category)}</strong><br>Submitted ${new Date(request.createdAt).toLocaleDateString()} by ${escapeHtml(request.contactName || "verified reseller contact")}.</p>
-                  <p class="muted">Dome is coordinating this request. No separate admin login is required.</p>
+                  ${request.status === "Requested" ? `
+                    <p class="muted">Approve or decline this request as the OEM. Contact exchange will be added as a separate routed step.</p>
+                    <div class="form-actions compact">
+                      <button class="button small" type="button" data-authorization-action="Accepted" data-authorization-id="${escapeHtml(request.id)}">Accept</button>
+                      <button class="button small danger" type="button" data-authorization-action="Declined" data-authorization-id="${escapeHtml(request.id)}">Decline</button>
+                    </div>
+                  ` : `<p class="notice ${request.status === "Accepted" ? "success" : "warn"}">${request.status === "Accepted" ? "Accepted. Contact routing is the next workflow to define." : "Declined by your OEM team."}</p>`}
                 </article>
               `).join("")}</div>
             ` : `<div class="empty">No incoming authorization requests yet. New reseller requests for your OEM profile will appear here.</div>`}
@@ -919,6 +1091,7 @@ function profileSetupPage() {
   const savedProducts = state.profile?.products || [];
   const productRows = productEditorRows(savedProducts);
   const productLimit = plan?.productLimit || plans.basic?.productLimit || 3;
+  const gstAutoEnabled = state.boot.config.gstLookupMode === "provider";
   return shell(`
     <main class="page">
       <header class="page-head">
@@ -934,7 +1107,7 @@ function profileSetupPage() {
               ${["Reseller", "OEM", "Buyer"].map((item) => `<option ${item === role ? "selected" : ""}>${item}</option>`).join("")}
             </select></label>
             <label><span class="label">Business / organization name</span><input class="input" name="businessName" required value="${escapeHtml(state.profile?.businessName || "")}"></label>
-            <label><span class="label">GST Number</span><input class="input" name="gstNumber" maxlength="15" data-gst-auto value="${escapeHtml(state.profile?.gstNumber || "")}"><span id="gstLookupNotice" class="field-note" aria-live="polite"></span></label>
+            <label><span class="label">GST Number</span><input class="input" name="gstNumber" maxlength="15" ${gstAutoEnabled ? "data-gst-auto" : ""} value="${escapeHtml(state.profile?.gstNumber || "")}"><span id="gstLookupNotice" class="field-note" aria-live="polite">${gstAutoEnabled ? "" : "Automatic lookup is not connected. Enter the registered details manually."}</span></label>
             <label><span class="label">Orders completed on GeM</span><input class="input" name="ordersCompleted" type="number" min="0" value="${escapeHtml(state.profile?.ordersCompleted || "")}"></label>
             <label><span class="label">State</span><input class="input" name="state" value="${escapeHtml(state.profile?.state || "")}"></label>
             <label><span class="label">City</span><input class="input" name="city" value="${escapeHtml(state.profile?.city || "")}"></label>
@@ -979,7 +1152,7 @@ function profileSetupPage() {
           </div>
           <div class="card">
             <h2>GST verification</h2>
-            <p>Enter a valid GSTIN and Dome will fill the business fields available from the connected GST record.</p>
+            <p>${gstAutoEnabled ? "Enter a valid GSTIN and Dome will fill only the business fields returned by the connected GST provider." : "No GST provider is connected, so Dome will not guess or fabricate business information. Enter the details exactly as they appear on the GST registration."}</p>
             ${state.gstLookup ? `
               <div class="notice success gst-summary">
                 <strong>${escapeHtml(pickGstValue(state.gstLookup.result, ["tradeName", "tradeNam", "legalName", "lgnm"]))}</strong>
@@ -1055,7 +1228,7 @@ function simpleFormPage(kind, id = "") {
     const categoryOptions = [...new Set([business.category, ...preferredCategories, ...state.boot.categories])];
     return shell(`
       <main class="page"><div class="container split">
-        <header class="page-head"><p class="eyebrow">Authorization request</p><h1>Request authorization from ${escapeHtml(business.name)}.</h1><p>Dome will attach your verified account and reseller profile, review the request and route it to the OEM.</p></header>
+        <header class="page-head"><p class="eyebrow">Authorization request</p><h1>Request authorization from ${escapeHtml(business.name)}.</h1><p>Dome will attach your verified account and reseller profile, then send the request directly to the OEM for approval.</p></header>
         <form class="card" id="authorizationForm" data-oem-id="${business.id}">
           <div id="formNotice"></div>
           <div class="request-identity">
@@ -1189,6 +1362,21 @@ function formPayload(form) {
   return payload;
 }
 
+function focusFirstInvalid(form) {
+  if (!form) return;
+  const field = form.querySelector(":invalid");
+  if (!field) return;
+  field.classList.add("field-invalid");
+  field.focus({ preventScroll: true });
+  field.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function handleInvalid(event) {
+  const form = event.target.closest("form");
+  if (!form || form.querySelector(":invalid") !== event.target) return;
+  requestAnimationFrame(() => focusFirstInvalid(form));
+}
+
 async function onSubmit(event) {
   const form = event.target.closest("form");
   if (!form) return;
@@ -1211,10 +1399,12 @@ async function onSubmit(event) {
       state.profile = result.profile;
       state.productDraftRows = null;
       localStorage.setItem("domeUser", JSON.stringify(result.user));
-      setRoute("/dashboard");
+      const returnTo = localStorage.getItem("domePostProfileRoute") || "";
+      localStorage.removeItem("domePostProfileRoute");
+      setRoute(returnTo || "/dashboard");
     }
     if (form.id === "loginForm") {
-      notice("Enter the code sent to your phone or email, then choose Verify and log in.", "warn");
+      if (state.loginIdentity.needsRegistration && state.loginIdentity.emailVerified) await createAccountFromLogin();
     }
     if (form.id === "contactForm") {
       payload.businessId = form.dataset.businessId;
@@ -1241,6 +1431,7 @@ async function onSubmit(event) {
     }
   } catch (error) {
     notice(error.message, "error");
+    focusFirstInvalid(form);
   }
 }
 
@@ -1253,12 +1444,14 @@ async function handleClick(event) {
   if (action === "logout") {
     localStorage.removeItem("domeUser");
     localStorage.removeItem("domeToken");
+    localStorage.removeItem("domePostProfileRoute");
     state.user = null;
     state.token = "";
     state.profile = null;
     state.revealedContacts = {};
     state.authorizationRequests = [];
     state.productDraftRows = null;
+    resetLoginIdentity();
     setRoute("/");
   }
   const modeButton = event.target.closest("[data-login-mode]");
@@ -1270,6 +1463,12 @@ async function handleClick(event) {
   if (action === "send-register-code") {
     const channel = event.target.closest("[data-channel]")?.dataset.channel;
     const form = document.querySelector("#registerForm");
+    const field = form.elements[channel];
+    if (!field?.checkValidity()) {
+      field?.reportValidity();
+      focusFirstInvalid(form);
+      return;
+    }
     try {
       const payload = formPayload(form);
       const body = channel === "email"
@@ -1282,34 +1481,28 @@ async function handleClick(event) {
       notice(result.devCode ? `Code sent. Demo code: ${result.devCode}.` : "Code sent. Enter the 6-digit code below.", "success", `#${channel}CodeNotice`);
     } catch (error) {
       notice(error.message, "error", `#${channel}CodeNotice`);
+      field?.focus();
+      field?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }
   if (action === "verify-register-code") {
     const channel = event.target.closest("[data-channel]")?.dataset.channel;
-    const form = document.querySelector("#registerForm");
-    try {
-      const payload = formPayload(form);
-      const code = channel === "email" ? payload.emailOtp : payload.phoneOtp;
-      if (!/^\d{6}$/.test(String(code || ""))) throw new Error("Enter the 6-digit verification code.");
-      const body = channel === "email"
-        ? { channel, email: payload.email, code: payload.emailOtp }
-        : { channel, phone: payload.phone, code: payload.phoneOtp };
-      await api("/api/otp/verify", { method: "POST", body: JSON.stringify(body) });
-      state.identity[channel === "email" ? "emailVerified" : "phoneVerified"] = true;
-      render();
-      notice(channel === "email" ? "Email verified." : "Mobile verified.", "success", `#${channel}CodeNotice`);
-    } catch (error) {
-      notice(error.message, "error", `#${channel}CodeNotice`);
-    }
+    await verifyRegistrationOtp(channel);
   }
   if (action === "send-login-code") {
     const channel = event.target.closest("[data-channel]")?.dataset.channel;
     const form = document.querySelector("#loginForm");
+    const field = form.elements[channel === "email" ? "loginEmail" : "loginPhone"];
+    if (!field?.checkValidity()) {
+      field?.reportValidity();
+      focusFirstInvalid(form);
+      return;
+    }
     try {
       const payload = formPayload(form);
       const body = channel === "email"
-        ? { channel, email: payload.loginEmail, purpose: "login" }
-        : { channel, phone: payload.loginPhone, purpose: "login" };
+        ? { channel, email: payload.loginEmail, purpose: state.loginIdentity.needsRegistration ? "registration" : "login" }
+        : { channel, phone: payload.loginPhone, purpose: "access" };
       const result = await api("/api/otp/start", { method: "POST", body: JSON.stringify(body) });
       state.loginIdentity[`${channel}CodeSent`] = true;
       state.loginIdentity[`${channel}Otp`] = "";
@@ -1317,34 +1510,13 @@ async function handleClick(event) {
       notice(result.devCode ? `Code sent. Demo code: ${result.devCode}.` : "Code sent. Enter the 6-digit code below.", "success", "#loginCodeNotice");
     } catch (error) {
       notice(error.message, "error", "#loginCodeNotice");
+      field?.focus();
+      field?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }
   if (action === "verify-login-code") {
     const channel = event.target.closest("[data-channel]")?.dataset.channel;
-    const form = document.querySelector("#loginForm");
-    try {
-      const payload = formPayload(form);
-      const code = channel === "email" ? payload.loginEmailOtp : payload.loginPhoneOtp;
-      if (!/^\d{6}$/.test(String(code || ""))) throw new Error("Enter the 6-digit verification code.");
-      const verifyBody = channel === "email"
-        ? { channel, email: payload.loginEmail, code: payload.loginEmailOtp }
-        : { channel, phone: payload.loginPhone, code: payload.loginPhoneOtp };
-      await api("/api/otp/verify", { method: "POST", body: JSON.stringify(verifyBody) });
-      const loginBody = channel === "email"
-        ? { channel, email: payload.loginEmail }
-        : { channel, phone: payload.loginPhone };
-      const result = await api("/api/session/otp", { method: "POST", body: JSON.stringify(loginBody) });
-      state.user = result.user;
-      state.profile = result.profile || null;
-      state.revealedContacts = Object.fromEntries((result.revealedContacts || []).map((item) => [item.businessId, item]));
-      state.authorizationRequests = result.authorizationRequests || [];
-      state.token = result.token;
-      localStorage.setItem("domeUser", JSON.stringify(result.user));
-      localStorage.setItem("domeToken", result.token);
-      setRoute(result.user.role === "Admin" ? "/admin" : "/dashboard");
-    } catch (error) {
-      notice(error.message, "error", "#loginCodeNotice");
-    }
+    await verifyLoginOtp(channel);
   }
   if (action === "send-phone-otp" || action === "send-otp") {
     const form = document.querySelector("#registerForm");
@@ -1428,7 +1600,7 @@ async function handleClick(event) {
     const businessId = event.target.closest("[data-business-id]")?.dataset.businessId;
     const target = document.querySelector("#revealNotice");
     if (!state.user || !state.token) {
-      if (target) target.innerHTML = `<p class="notice warn"><strong>Log in to request authorization.</strong><br>Create or access your Dome account to start this OEM request through Dome.</p>`;
+      setRoute(`/login?next=${encodeURIComponent(`/profile/${businessId}`)}`);
       return;
     }
     try {
@@ -1477,6 +1649,22 @@ async function handleClick(event) {
     render();
   }
 
+  const authorizationAction = event.target.closest("[data-authorization-action]");
+  if (authorizationAction) {
+    authorizationAction.disabled = true;
+    try {
+      const result = await api(`/api/authorization/${authorizationAction.dataset.authorizationId}/status`, {
+        method: "POST",
+        body: JSON.stringify({ status: authorizationAction.dataset.authorizationAction })
+      });
+      state.authorizationRequests = state.authorizationRequests.map((request) => request.id === result.request.id ? result.request : request);
+      render();
+    } catch (error) {
+      authorizationAction.disabled = false;
+      alert(error.message);
+    }
+  }
+
   const applicationAction = event.target.closest("[data-application-action]");
   if (applicationAction) {
     try {
@@ -1510,20 +1698,24 @@ function handleInput(event) {
   const loginField = event.target.dataset.loginField;
   if (loginField) state.loginIdentity[loginField] = event.target.value;
 
+  const loginConsent = event.target.dataset.loginConsent;
+  if (loginConsent) {
+    state.loginIdentity[loginConsent] = event.target.checked;
+    if (loginConsent === "consent" && event.target.checked && state.loginIdentity.emailVerified) void createAccountFromLogin();
+  }
+
   const otpChannel = event.target.dataset.otpCode;
   if (otpChannel) {
     event.target.value = event.target.value.replace(/\D/g, "").slice(0, 6);
     state.identity[`${otpChannel}Otp`] = event.target.value;
-    const button = event.target.closest(".verify-card")?.querySelector("[data-verify-button]");
-    if (button) button.disabled = event.target.value.length !== 6;
+    if (event.target.value.length === 6) void verifyRegistrationOtp(otpChannel);
   }
 
   const loginOtpChannel = event.target.dataset.loginOtp;
   if (loginOtpChannel) {
     event.target.value = event.target.value.replace(/\D/g, "").slice(0, 6);
     state.loginIdentity[`${loginOtpChannel}Otp`] = event.target.value;
-    const button = document.querySelector("[data-login-verify]");
-    if (button) button.disabled = event.target.value.length !== 6;
+    if (event.target.value.length === 6) void verifyLoginOtp(loginOtpChannel);
   }
 
   if (event.target.matches("[data-profile-role]")) {
@@ -1639,7 +1831,7 @@ async function loadBootstrapWithRetry() {
       return await api("/api/bootstrap");
     } catch (error) {
       lastError = error;
-      app.innerHTML = `<div class="loading">Waking the Dome demo... retry ${attempt}/4</div>`;
+      app.innerHTML = `<div class="loading">Connecting to Dome... retry ${attempt}/4</div>`;
       await new Promise((resolve) => setTimeout(resolve, attempt * 900));
     }
   }
@@ -1657,6 +1849,7 @@ window.addEventListener("hashchange", () => {
 app.addEventListener("click", handleClick);
 app.addEventListener("submit", onSubmit);
 app.addEventListener("input", handleInput);
+app.addEventListener("invalid", handleInvalid, true);
 
 init().catch((error) => {
   app.innerHTML = `
