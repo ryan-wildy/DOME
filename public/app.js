@@ -61,6 +61,19 @@ function productGemUrl(product) {
   return typeof product === "string" ? "" : product?.gemUrl || product?.gemLink || "";
 }
 
+function knownCategories() {
+  return [...new Set((state.boot?.categories || []).filter(Boolean))];
+}
+
+function categoryChoice(value = "") {
+  return knownCategories().includes(value) ? value : value ? "__other__" : "";
+}
+
+function categoryOptions(selected = "", includePrompt = true) {
+  const choice = categoryChoice(selected);
+  return `${includePrompt ? `<option value="" ${choice ? "" : "selected"} disabled>Select a category</option>` : ""}${knownCategories().map((category) => `<option value="${escapeHtml(category)}" ${choice === category ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}<option value="__other__" ${choice === "__other__" ? "selected" : ""}>Other</option>`;
+}
+
 function productInputValue(products = []) {
   return products.map((product) => {
     const name = productName(product);
@@ -70,11 +83,14 @@ function productInputValue(products = []) {
 }
 
 function productRowsFromForm(form) {
-  return [...form.querySelectorAll("[data-product-row]")].map((row) => ({
-    name: row.querySelector('[name="productName"]')?.value.trim() || "",
-    gemUrl: row.querySelector('[name="productGemUrl"]')?.value.trim() || "",
-    category: row.querySelector('[name="productCategory"]')?.value.trim() || ""
-  })).filter((product) => product.name || product.gemUrl || product.category);
+  return [...form.querySelectorAll("[data-product-row]")].map((row) => {
+    const category = row.querySelector('[name="productCategoryChoice"]')?.value || "";
+    return {
+      name: row.querySelector('[name="productName"]')?.value.trim() || "",
+      gemUrl: row.querySelector('[name="productGemUrl"]')?.value.trim() || "",
+      category: category === "__other__" ? row.querySelector('[name="productCategoryOther"]')?.value.trim() || "" : category
+    };
+  }).filter((product) => product.name || product.gemUrl || product.category);
 }
 
 function productEditorRows(products = []) {
@@ -88,7 +104,8 @@ function productEditorRows(products = []) {
 
 function contactRowsFromForm(form) {
   return [...form.querySelectorAll("[data-contact-row]")].map((row) => ({
-    purpose: row.querySelector('[name="contactPurpose"]')?.value.trim() || "",
+    designation: row.querySelector('[name="contactDesignation"]')?.value.trim() || "",
+    purpose: row.querySelector('[name="contactDesignation"]')?.value.trim() || "",
     name: row.querySelector('[name="contactName"]')?.value.trim() || "",
     phone: row.querySelector('[name="contactPhone"]')?.value.trim() || "",
     email: row.querySelector('[name="contactEmail"]')?.value.trim() || ""
@@ -97,13 +114,13 @@ function contactRowsFromForm(form) {
 
 function contactEditorRows(contacts = []) {
   const normalized = Array.isArray(contacts) ? contacts.map((contact) => ({
-    purpose: contact?.purpose || "",
+    designation: contact?.designation || contact?.purpose || "",
     name: contact?.name || "",
     phone: contact?.phone || "",
     email: contact?.email || ""
   })) : [];
   const rows = state.contactDraftRows || normalized;
-  return rows.length ? rows : [{ purpose: "Reseller onboarding", name: "", phone: "", email: "" }];
+  return rows.length ? rows : [{ designation: "Channel manager", name: "", phone: "", email: "" }];
 }
 
 function authorizationStatusClass(status) {
@@ -1081,6 +1098,68 @@ function loginPage() {
   `);
 }
 
+function authorizationDecisionForm(request, admin = false) {
+  return `<form class="authorization-decision" ${admin ? "data-admin-authorization-decision" : "data-authorization-decision"} data-authorization-id="${escapeHtml(request.id)}">
+    <div class="decision-head"><div><h4>${admin ? "Dome operations update" : "OEM decision"}</h4><p>${admin ? "Record the current stage and keep the shared collaboration record accurate." : "Keep this record aligned with the authorization maintained for the reseller."}</p></div><label><span class="label">Status</span><select class="select" name="status">${["Under Consideration", "Accepted", "Rejected"].map((status) => `<option ${request.status === status ? "selected" : ""}>${status}</option>`).join("")}</select></label></div>
+    <div class="form-grid authorization-fields">
+      <label><span class="label">Authorization number</span><input class="input" name="authorizationNumber" value="${escapeHtml(request.authorizationNumber || "")}"></label>
+      <label><span class="label">Authorization agency</span><input class="input" name="authorizationAgency" value="${escapeHtml(request.authorizationAgency || (admin ? request.oemName : state.user?.businessName) || "")}"></label>
+      <label><span class="label">Authorization date</span><input class="input" name="authorizationDate" type="date" value="${escapeHtml(request.authorizationDate || "")}"></label>
+      <label><span class="label">Valid from</span><input class="input" name="validFrom" type="date" value="${escapeHtml(request.validFrom || "")}"></label>
+      <label><span class="label">Valid to</span><input class="input" name="validTo" type="date" value="${escapeHtml(request.validTo || "")}"></label>
+      ${admin ? `<label class="full"><span class="label">Internal operations note</span><textarea class="textarea" name="adminNote" placeholder="Follow-up owner, blocker or next action">${escapeHtml(request.adminNote || "")}</textarea></label>` : ""}
+    </div>
+    <div class="form-actions"><button class="button" type="submit">${admin ? "Save operations update" : "Save collaboration decision"}</button></div>
+  </form>`;
+}
+
+function authorizationAccordion(request, perspective, editable = false, admin = false) {
+  const partyName = perspective === "oem" ? request.vendorName : request.oemName;
+  const openRequest = new URLSearchParams(state.route.split("?")[1] || "").get("request");
+  return `<details class="authorization-accordion" ${openRequest === request.id ? "open" : ""}>
+    <summary>
+      <span class="status-pill ${authorizationStatusClass(request.status)}">${escapeHtml(request.status)}</span>
+      <span class="authorization-party"><strong>${escapeHtml(partyName || "Dome member")}</strong><small>${escapeHtml(request.category || "Category pending")} · ${escapeHtml(request.gemSellerId || "Seller ID pending")}</small></span>
+      <span class="request-reference">${escapeHtml(request.reference || request.id.slice(0, 8).toUpperCase())}</span>
+      <span class="accordion-chevron" aria-hidden="true"></span>
+    </summary>
+    <div class="authorization-accordion-body">
+      ${authorizationSummary(request, perspective)}
+      ${perspective === "reseller" ? `<p class="notice ${authorizationStatusClass(request.status)}">${request.status === "Accepted" ? "The OEM has accepted this collaboration. The shared authorization details are ready for the next GeM step." : request.status === "Rejected" ? "The OEM has rejected this request. Review category fit or profile readiness before opening a new request." : "The OEM is reviewing your GeM identity, category fit and operating profile."}</p><a class="inline-link" href="#/profile/${escapeHtml(request.oemId)}">Open OEM profile</a>` : ""}
+      ${editable ? authorizationDecisionForm(request, admin) : ""}
+    </div>
+  </details>`;
+}
+
+function authorizationPreview(requests, perspective) {
+  if (!requests.length) return `<div class="empty">No authorization requests yet.</div>`;
+  return `<div class="authorization-preview-list">${requests.slice(0, 4).map((request) => {
+    const party = perspective === "oem" ? request.vendorName : request.oemName;
+    return `<a class="authorization-preview-row" href="#/authorizations?request=${encodeURIComponent(request.id)}"><span class="status-pill ${authorizationStatusClass(request.status)}">${escapeHtml(request.status)}</span><span><strong>${escapeHtml(party || "Dome member")}</strong><small>${escapeHtml(request.category || "Category pending")} · ${escapeHtml(request.reference || "")}</small></span><span class="preview-arrow">›</span></a>`;
+  }).join("")}</div>`;
+}
+
+function authorizationWorkspacePage() {
+  if (!state.user) return loginPage();
+  const role = state.user.role;
+  if (role === "Admin") {
+    state.adminTab = "authorizations";
+    return adminPage();
+  }
+  const isOem = role === "OEM";
+  const isReseller = ["Reseller", "Vendor"].includes(role);
+  if (!isOem && !isReseller) return shell(`<main class="page"><div class="container empty">Authorization collaboration is available to OEM and Reseller profiles.</div></main>`);
+  const requests = state.authorizationRequests;
+  const count = (status) => requests.filter((request) => request.status === status).length;
+  return shell(`<main class="page">
+    <header class="page-head authorization-page-head"><a class="back-link" href="#/dashboard">Back to dashboard</a><p class="eyebrow">GeM collaboration</p><h1>${isOem ? "Reseller authorization requests" : "OEM authorization status"}</h1><p>${isOem ? "Review reseller capability, record your decision and maintain authorization validity in one shared workspace." : "Track every OEM reachout from submission through decision and authorization validity."}</p></header>
+    <div class="container">
+      <div class="authorization-metrics"><div><strong>${requests.length}</strong><span>Total</span></div><div><strong>${count("Under Consideration")}</strong><span>Under consideration</span></div><div><strong>${count("Accepted")}</strong><span>Accepted</span></div><div><strong>${count("Rejected")}</strong><span>Rejected</span></div></div>
+      ${requests.length ? `<div class="authorization-accordion-list">${requests.map((request) => authorizationAccordion(request, isOem ? "oem" : "reseller", isOem)).join("")}</div>` : `<div class="empty">${isOem ? "New reseller requests for your OEM profile will appear here." : "Open an OEM profile and start an authorization request when ready."}</div>`}
+    </div>
+  </main>`);
+}
+
 function dashboardPage() {
   if (!state.user) return loginPage();
   const role = state.user.role;
@@ -1094,12 +1173,12 @@ function dashboardPage() {
   ] : isOem ? [
     ["Complete profile", "GST, products, contacts and microsite plan", "#/profile-setup"],
     ["Reseller discovery", "Find capable resellers", "#/directory"],
-    ["Authorization requests", "Review incoming reseller requests", "#/dashboard"],
+    ["Authorization requests", "Review incoming reseller requests", "#/authorizations"],
     ["Sales kits", "Share brochures, pricing and sales material", "#/learn"]
   ] : isVendor ? [
     ["Complete profile", "GST, GeM seller ID, categories and order count", "#/profile-setup"],
     ["OEM discovery", "Request authorization from profiles", "#/directory?type=OEM"],
-    ["Authorization status", "Track OEM requests submitted through Dome", "#/dashboard"]
+    ["Authorization status", "Track OEM requests submitted through Dome", "#/authorizations"]
   ] : [
     ["Complete profile", "Choose Buyer, Reseller or OEM details", "#/profile-setup"],
     ["Supplier search", "Find OEMs and Resellers", "#/directory"],
@@ -1122,61 +1201,7 @@ function dashboardPage() {
           </a>
         `).join("")}
       </div>
-      ${isVendor ? `
-        <section class="section">
-          <div class="container">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">OEM reachouts</p>
-                <h2>Authorization request status</h2>
-              </div>
-            </div>
-            ${state.authorizationRequests.length ? `
-              <div class="collaboration-list">${state.authorizationRequests.map((request) => `
-                <article class="card collaboration-record">
-                  ${authorizationSummary(request, "reseller")}
-                  <p class="notice ${authorizationStatusClass(request.status)}">${request.status === "Accepted"
-                    ? "The OEM has accepted this collaboration. The authorization details above are the shared working record for the next GeM step."
-                    : request.status === "Rejected"
-                      ? "The OEM has rejected this request. Review category fit or profile readiness before opening a new request."
-                      : "The OEM is reviewing your GeM identity, category fit and operating profile."}</p>
-                  <a class="inline-link" href="#/profile/${escapeHtml(request.oemId)}">Open OEM profile</a>
-                </article>
-              `).join("")}</div>
-            ` : `<div class="empty">No OEM authorization requests yet. Open an OEM profile and start a request when ready.</div>`}
-          </div>
-        </section>
-      ` : ""}
-      ${isOem ? `
-        <section class="section" id="authorizationRequests">
-          <div class="container">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">Channel pipeline</p>
-                <h2>Incoming authorization requests</h2>
-              </div>
-            </div>
-            ${state.authorizationRequests.length ? `
-              <div class="collaboration-list">${state.authorizationRequests.map((request) => `
-                <article class="card collaboration-record">
-                  ${authorizationSummary(request, "oem")}
-                  <form class="authorization-decision" data-authorization-decision data-authorization-id="${escapeHtml(request.id)}">
-                    <div class="decision-head"><div><h4>OEM decision</h4><p>Keep this record aligned with the authorization maintained for the reseller.</p></div><label><span class="label">Status</span><select class="select" name="status">${["Under Consideration", "Accepted", "Rejected"].map((status) => `<option ${request.status === status ? "selected" : ""}>${status}</option>`).join("")}</select></label></div>
-                    <div class="form-grid authorization-fields">
-                      <label><span class="label">Authorization number</span><input class="input" name="authorizationNumber" value="${escapeHtml(request.authorizationNumber || "")}"></label>
-                      <label><span class="label">Authorization agency</span><input class="input" name="authorizationAgency" value="${escapeHtml(request.authorizationAgency || state.user.businessName || "")}"></label>
-                      <label><span class="label">Authorization date</span><input class="input" name="authorizationDate" type="date" value="${escapeHtml(request.authorizationDate || "")}"></label>
-                      <label><span class="label">Valid from</span><input class="input" name="validFrom" type="date" value="${escapeHtml(request.validFrom || "")}"></label>
-                      <label><span class="label">Valid to</span><input class="input" name="validTo" type="date" value="${escapeHtml(request.validTo || "")}"></label>
-                    </div>
-                    <div class="form-actions"><button class="button" type="submit">Save collaboration decision</button></div>
-                  </form>
-                </article>
-              `).join("")}</div>
-            ` : `<div class="empty">No incoming authorization requests yet. New reseller requests for your OEM profile will appear here.</div>`}
-          </div>
-        </section>
-      ` : ""}
+      ${isVendor || isOem ? `<section class="section"><div class="container"><div class="section-head"><div><p class="eyebrow">${isOem ? "Channel pipeline" : "OEM reachouts"}</p><h2>${isOem ? "Recent authorization requests" : "Recent request status"}</h2></div><a class="button secondary" href="#/authorizations">View all requests</a></div>${authorizationPreview(state.authorizationRequests, isOem ? "oem" : "reseller")}</div></section>` : ""}
     </main>
   `);
 }
@@ -1201,7 +1226,7 @@ function profileSetupPage() {
   const gstVerified = Boolean(state.gstLookup && state.gstLookupStatus === "verified" && (!lookupGst || lookupGst === draftGst));
   const hasSavedProfile = Boolean(state.profile?.completion);
   const showDetails = hasRole && (!needsGst || !gstAutoEnabled || gstVerified || hasSavedProfile);
-  const lookingForCategories = Array.isArray(draft.lookingForCategories) ? draft.lookingForCategories.join(", ") : String(draft.lookingForCategories || "");
+  const lookingForCategory = Array.isArray(draft.lookingForCategories) ? draft.lookingForCategories[0] || "" : String(draft.lookingForCategories || "");
   const contactRows = contactEditorRows(draft.contactList || []);
   return shell(`
     <main class="page">
@@ -1238,7 +1263,10 @@ function profileSetupPage() {
             <label><span class="label">City</span><input class="input" name="city" value="${escapeHtml(draft.city || "")}"></label>
             <label><span class="label">Contact person</span><input class="input" name="contactPerson" value="${escapeHtml(draft.contactPerson || "")}"></label>
             ${role === "Reseller" ? `
-              <label class="full"><span class="label">OEM categories looking for</span><input class="input" name="lookingForCategories" placeholder="Printer Cartridges, IT Hardware" value="${escapeHtml(lookingForCategories)}"></label>
+              <div class="full category-field">
+                <label><span class="label">Primary OEM category</span><select class="select" name="lookingForCategoryChoice" data-category-select required>${categoryOptions(lookingForCategory)}</select></label>
+                <label class="category-other" ${categoryChoice(lookingForCategory) === "__other__" ? "" : "hidden"}><span class="label">Specify category</span><input class="input" name="lookingForCategoryOther" data-category-other ${categoryChoice(lookingForCategory) === "__other__" ? "required" : ""} value="${categoryChoice(lookingForCategory) === "__other__" ? escapeHtml(lookingForCategory) : ""}" placeholder="Enter the product category"></label>
+              </div>
               <label class="full"><span class="label">GST Number</span><input class="input" name="gstNumber" maxlength="15" ${gstAutoEnabled ? "data-gst-auto" : ""} value="${escapeHtml(draftGst)}" placeholder="15-character GSTIN"><span id="gstLookupNotice" class="field-note" aria-live="polite">${state.gstLookupStatus === "loading" ? "Checking GST registration..." : gstVerified ? "GST record verified and business fields updated." : "Optional here. Enter a valid GSTIN to fill registered business details."}</span></label>
             ` : ""}
             ${role === "OEM" ? `
@@ -1256,7 +1284,10 @@ function profileSetupPage() {
                     <div class="product-row" data-product-row>
                       <label><span class="label">Product ${index + 1}</span><input class="input" name="productName" value="${escapeHtml(product.name || "")}" placeholder="Product name"></label>
                       <label><span class="label">GeM link</span><input class="input" name="productGemUrl" type="url" value="${escapeHtml(product.gemUrl || "")}" placeholder="https://gem.gov.in/..."></label>
-                      <label><span class="label">Category</span><input class="input" name="productCategory" value="${escapeHtml(product.category || "")}" placeholder="Printer Cartridges"></label>
+                      <div class="category-field product-category-field">
+                        <label><span class="label">Category</span><select class="select" name="productCategoryChoice" data-category-select>${categoryOptions(product.category || "")}</select></label>
+                        <label class="category-other" ${categoryChoice(product.category || "") === "__other__" ? "" : "hidden"}><span class="label">Specify category</span><input class="input" name="productCategoryOther" data-category-other ${categoryChoice(product.category || "") === "__other__" ? "required" : ""} value="${categoryChoice(product.category || "") === "__other__" ? escapeHtml(product.category || "") : ""}" placeholder="Enter category"></label>
+                      </div>
                       ${productRows.length > 1 ? `<button class="button small danger" type="button" data-action="remove-product-row" data-product-index="${index}">Remove</button>` : ""}
                     </div>
                   `).join("")}
@@ -1265,7 +1296,7 @@ function profileSetupPage() {
               <div class="full contact-editor">
                 <div class="section-head compact"><div><h3>Business contacts</h3><p class="muted">Add the right person for reseller onboarding, sales, service or accounts.</p></div><button class="button small secondary" type="button" data-action="add-contact-row">Add contact</button></div>
                 <div class="contact-row-list">${contactRows.map((contact, index) => `<div class="contact-row" data-contact-row>
-                  <label><span class="label">Purpose</span><select class="select" name="contactPurpose">${["Reseller onboarding", "Government sales", "Product support", "Accounts", "Other"].map((purpose) => `<option ${contact.purpose === purpose ? "selected" : ""}>${purpose}</option>`).join("")}</select></label>
+                  <label><span class="label">Designation</span><input class="input" name="contactDesignation" value="${escapeHtml(contact.designation || contact.purpose || "")}" placeholder="Channel manager"></label>
                   <label><span class="label">Contact name</span><input class="input" name="contactName" value="${escapeHtml(contact.name)}"></label>
                   <label><span class="label">Mobile</span><input class="input" name="contactPhone" inputmode="tel" value="${escapeHtml(contact.phone)}"></label>
                   <label><span class="label">Email</span><input class="input" name="contactEmail" type="email" value="${escapeHtml(contact.email)}"></label>
@@ -1366,7 +1397,7 @@ function simpleFormPage(kind, id = "") {
     const contactName = state.profile?.contactPerson || "";
     const territory = [state.profile?.city, state.profile?.state].filter(Boolean).join(", ");
     const preferredCategories = state.profile?.lookingForCategories || [];
-    const categoryOptions = [...new Set([business.category, ...preferredCategories, ...state.boot.categories])];
+    const defaultCategory = preferredCategories[0] || business.category || "";
     return shell(`
       <main class="page"><div class="container split">
         <header class="page-head"><p class="eyebrow">Authorization request</p><h1>Request authorization from ${escapeHtml(business.name)}.</h1><p>Dome will attach your verified account and reseller profile, then send the request directly to the OEM for approval.</p></header>
@@ -1382,7 +1413,10 @@ function simpleFormPage(kind, id = "") {
             <div><span>Territory</span><strong>${escapeHtml(territory || "Add in profile")}</strong></div>
             <div><span>Orders completed</span><strong>${Number(state.profile.ordersCompleted || 0).toLocaleString("en-IN")}</strong></div>
           </div>
-          <label><span class="label">Product category</span><select class="select" name="category" required>${categoryOptions.map((cat) => `<option>${escapeHtml(cat)}</option>`).join("")}</select></label>
+          <div class="category-field">
+            <label><span class="label">Product category</span><select class="select" name="categoryChoice" data-category-select required>${categoryOptions(defaultCategory)}</select></label>
+            <label class="category-other" ${categoryChoice(defaultCategory) === "__other__" ? "" : "hidden"}><span class="label">Specify category</span><input class="input" name="categoryOther" data-category-other ${categoryChoice(defaultCategory) === "__other__" ? "required" : ""} value="${categoryChoice(defaultCategory) === "__other__" ? escapeHtml(defaultCategory) : ""}" placeholder="Enter the product category"></label>
+          </div>
           <label><span class="label">Products or authorization scope</span><textarea class="textarea" name="requestedProducts" placeholder="Product families or catalogue scope you want to represent"></textarea></label>
           <p class="muted">Need to change these details? <a class="inline-link" href="#/profile-setup">Update your profile</a> before submitting.</p>
           <div class="form-actions"><button class="button" type="submit">Send authorization request</button></div>
@@ -1458,12 +1492,18 @@ function adminPage() {
         <p>Review member applications, authorization requests, setup work, registrations and platform activity.</p>
       </header>
       <div class="container">
-        <div class="card">
+        <div class="card admin-key-panel">
           <label><span class="label">Admin key</span><input class="input" data-admin-key value="${escapeHtml(state.adminKey)}"></label>
           <div class="form-actions"><button class="button" data-action="load-admin">Load admin data</button></div>
         </div>
         <div class="tabs">
           ${Object.keys(rows).map((name) => `<button class="tab ${tab === name ? "active" : ""}" data-admin-tab="${name}">${name} (${rows[name].length})</button>`).join("")}
+        </div>
+        <div class="admin-metrics">
+          <div><strong>${admin.applications.filter((item) => item.status === "pending").length}</strong><span>Applications pending</span></div>
+          <div><strong>${admin.authorizationRequests.filter((item) => item.status === "Under Consideration").length}</strong><span>Authorizations in review</span></div>
+          <div><strong>${admin.setupRequests.filter((item) => item.status === "new").length}</strong><span>Setup requests open</span></div>
+          <div><strong>${admin.payments.filter((item) => !["paid", "captured"].includes(item.status)).length}</strong><span>Payments requiring attention</span></div>
         </div>
         ${adminTable(tab, rows[tab])}
       </div>
@@ -1473,6 +1513,13 @@ function adminPage() {
 
 function adminTable(tab, rows) {
   if (!rows.length) return `<div class="empty">No ${tab} records yet.</div>`;
+  if (tab === "authorizations") {
+    const count = (status) => rows.filter((row) => row.status === status).length;
+    return `<section class="admin-authorization-workspace">
+      <div class="section-head compact"><div><h2>Authorization operations</h2><p>Inspect the complete reseller-OEM record, monitor progress and correct the working status when support is required.</p></div><div class="tags"><span class="tag">${count("Under Consideration")} reviewing</span><span class="tag">${count("Accepted")} accepted</span><span class="tag">${count("Rejected")} rejected</span></div></div>
+      <div class="authorization-accordion-list">${rows.map((request) => authorizationAccordion(request, "oem", true, true)).join("")}</div>
+    </section>`;
+  }
   if (tab === "applications") {
     return `<div class="table-wrap"><table><thead><tr><th>Applicant</th><th>Contact</th><th>Status</th><th>Submitted</th><th>Action</th></tr></thead><tbody>${rows.map((row) => `
       <tr>
@@ -1504,6 +1551,11 @@ function formPayload(form) {
     const products = productRowsFromForm(form);
     if (products.length) payload.products = products;
     if (form.querySelector("[data-contact-row]")) payload.contactList = contactRowsFromForm(form);
+    const preferredCategory = payload.lookingForCategoryChoice === "__other__" ? payload.lookingForCategoryOther : payload.lookingForCategoryChoice;
+    if (preferredCategory) payload.lookingForCategories = [preferredCategory.trim()];
+  }
+  if (form.id === "authorizationForm") {
+    payload.category = payload.categoryChoice === "__other__" ? payload.categoryOther : payload.categoryChoice;
   }
   for (const checkbox of form.querySelectorAll('input[type="checkbox"]')) {
     payload[checkbox.name] = checkbox.checked;
@@ -1569,12 +1621,18 @@ async function onSubmit(event) {
       state.authorizationRequests = [result.request, ...state.authorizationRequests.filter((request) => request.id !== result.request.id)];
       setRoute("/dashboard");
     }
-    if (form.matches("[data-authorization-decision]")) {
+    if (form.matches("[data-authorization-decision], [data-admin-authorization-decision]")) {
+      const adminDecision = form.matches("[data-admin-authorization-decision]");
       const result = await api(`/api/authorization/${form.dataset.authorizationId}/status`, {
         method: "POST",
+        headers: adminDecision ? { "x-admin-key": state.adminKey } : {},
         body: JSON.stringify(payload)
       });
-      state.authorizationRequests = state.authorizationRequests.map((request) => request.id === result.request.id ? result.request : request);
+      if (adminDecision) {
+        state.admin.authorizationRequests = state.admin.authorizationRequests.map((request) => request.id === result.request.id ? { ...request, ...result.request } : request);
+      } else {
+        state.authorizationRequests = state.authorizationRequests.map((request) => request.id === result.request.id ? result.request : request);
+      }
       render();
     }
     if (form.id === "webinarForm") {
@@ -1749,7 +1807,7 @@ async function handleClick(event) {
     const form = document.querySelector("#profileForm");
     const contacts = contactRowsFromForm(form);
     state.profileDraft = { ...(state.profileDraft || state.profile || {}), ...formPayload(form), contactList: contacts };
-    state.contactDraftRows = [...contacts, { purpose: "Reseller onboarding", name: "", phone: "", email: "" }];
+    state.contactDraftRows = [...contacts, { designation: "Channel manager", name: "", phone: "", email: "" }];
     render();
     return;
   }
@@ -1759,7 +1817,7 @@ async function handleClick(event) {
     const contacts = contactRowsFromForm(form);
     contacts.splice(index, 1);
     state.profileDraft = { ...(state.profileDraft || state.profile || {}), ...formPayload(form), contactList: contacts };
-    state.contactDraftRows = contacts.length ? contacts : [{ purpose: "Reseller onboarding", name: "", phone: "", email: "" }];
+    state.contactDraftRows = contacts.length ? contacts : [{ designation: "Channel manager", name: "", phone: "", email: "" }];
     render();
     return;
   }
@@ -1882,6 +1940,17 @@ async function loadAdmin(shouldRender = true) {
 }
 
 function handleInput(event) {
+  if (event.target.matches("[data-category-select]")) {
+    const container = event.target.closest(".category-field");
+    const otherLabel = container?.querySelector(".category-other");
+    const otherInput = container?.querySelector("[data-category-other]");
+    const showOther = event.target.value === "__other__";
+    if (otherLabel) otherLabel.hidden = !showOther;
+    if (otherInput) {
+      otherInput.required = showOther;
+      if (showOther) otherInput.focus();
+    }
+  }
   const identityField = event.target.dataset.identityField;
   if (identityField) state.identity[identityField] = event.target.value;
 
@@ -1972,6 +2041,7 @@ function render() {
   else if (route === "/register") html = registerPage();
   else if (route === "/login") html = loginPage();
   else if (route === "/dashboard") html = dashboardPage();
+  else if (route === "/authorizations") html = authorizationWorkspacePage();
   else if (route === "/profile-setup") html = profileSetupPage();
   else if (route === "/admin") html = adminPage();
   else if (pathname === "contact") html = simpleFormPage("contact", id);

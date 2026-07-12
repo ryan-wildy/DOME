@@ -1002,8 +1002,11 @@ function revealedContactsForUser(db, user) {
 
 function authorizationRequestsForUser(db, user) {
   const isOem = user.role === "OEM" && user.businessId;
+  const isAdminUser = user.role === "Admin";
   return db.authorizationRequests
-    .filter((request) => isOem
+    .filter((request) => isAdminUser
+      ? true
+      : isOem
       ? request.oemId === user.businessId
       : request.userId === user.id || request.userEmail === user.email || request.email === user.email)
     .map((request) => ({
@@ -1026,6 +1029,7 @@ function authorizationRequestsForUser(db, user) {
       authorizationDate: request.authorizationDate || "",
       validFrom: request.validFrom || "",
       validTo: request.validTo || "",
+      adminNote: request.adminNote || "",
       status: request.status,
       createdAt: request.createdAt,
       updatedAt: request.updatedAt || request.createdAt,
@@ -1505,10 +1509,11 @@ async function api(req, res, pathname) {
     if (!tokenUser) return json(res, 401, { error: "Sign in required." });
     const liveUser = db.users.find((user) => user.id === tokenUser.id);
     if (!liveUser) return json(res, 401, { error: "Session user not found." });
-    if (liveUser.role !== "OEM" || !liveUser.businessId) return json(res, 403, { error: "Only the requested OEM can update this authorization request." });
+    const adminUpdate = liveUser.role === "Admin" && isAdmin(req);
+    if (!adminUpdate && (liveUser.role !== "OEM" || !liveUser.businessId)) return json(res, 403, { error: "Only the requested OEM or Dome admin can update this authorization request." });
     const request = db.authorizationRequests.find((item) => item.id === authorizationStatusMatch[1]);
     if (!request) return json(res, 404, { error: "Authorization request not found." });
-    if (request.oemId !== liveUser.businessId) return json(res, 403, { error: "This request belongs to another OEM." });
+    if (!adminUpdate && request.oemId !== liveUser.businessId) return json(res, 403, { error: "This request belongs to another OEM." });
     const payload = await readBody(req);
     const status = String(payload.status || "");
     if (!["Under Consideration", "Accepted", "Rejected"].includes(status)) return json(res, 422, { error: "Choose Under Consideration, Accepted or Rejected." });
@@ -1522,9 +1527,10 @@ async function api(req, res, pathname) {
     request.authorizationDate = String(payload.authorizationDate || "");
     request.validFrom = validFrom;
     request.validTo = validTo;
+    if (adminUpdate) request.adminNote = String(payload.adminNote || "").trim();
     request.updatedAt = new Date().toISOString();
     request.timeline ||= [];
-    if (previousStatus !== status) request.timeline.push({ stage: status, at: request.updatedAt, by: liveUser.businessName || "OEM" });
+    if (previousStatus !== status) request.timeline.push({ stage: status, at: request.updatedAt, by: adminUpdate ? "Dome Admin" : liveUser.businessName || "OEM" });
     if (status === "Accepted") request.acceptedAt = request.updatedAt;
     if (status === "Rejected") request.rejectedAt = request.updatedAt;
     addAudit(db, liveUser.email, `authorization_${status.toLowerCase().replaceAll(" ", "_")}`, `${request.vendorName} -> ${request.oemName}`);
@@ -1670,7 +1676,8 @@ async function api(req, res, pathname) {
       lookingForCategories: Array.isArray(payload.lookingForCategories) ? payload.lookingForCategories : String(payload.lookingForCategories || "").split(",").map((item) => item.trim()).filter(Boolean),
       products,
       contactList: Array.isArray(payload.contactList) ? payload.contactList.map((contact) => ({
-        purpose: String(contact?.purpose || "").trim(),
+        designation: String(contact?.designation || contact?.purpose || "").trim(),
+        purpose: String(contact?.designation || contact?.purpose || "").trim(),
         name: String(contact?.name || "").trim(),
         phone: normalizePhone(contact?.phone || ""),
         email: String(contact?.email || "").toLowerCase().trim()
