@@ -42,7 +42,8 @@ const state = {
   revealedContacts: {},
   authorizationRequests: [],
   profileDraft: null,
-  productDraftRows: null
+  productDraftRows: null,
+  contactDraftRows: null
 };
 
 const app = document.querySelector("#app");
@@ -83,6 +84,57 @@ function productEditorRows(products = []) {
     category: product?.category || ""
   }));
   return rows.length ? rows : [{ name: "", gemUrl: "", category: "" }];
+}
+
+function contactRowsFromForm(form) {
+  return [...form.querySelectorAll("[data-contact-row]")].map((row) => ({
+    purpose: row.querySelector('[name="contactPurpose"]')?.value.trim() || "",
+    name: row.querySelector('[name="contactName"]')?.value.trim() || "",
+    phone: row.querySelector('[name="contactPhone"]')?.value.trim() || "",
+    email: row.querySelector('[name="contactEmail"]')?.value.trim() || ""
+  })).filter((contact) => contact.purpose || contact.name || contact.phone || contact.email);
+}
+
+function contactEditorRows(contacts = []) {
+  const normalized = Array.isArray(contacts) ? contacts.map((contact) => ({
+    purpose: contact?.purpose || "",
+    name: contact?.name || "",
+    phone: contact?.phone || "",
+    email: contact?.email || ""
+  })) : [];
+  const rows = state.contactDraftRows || normalized;
+  return rows.length ? rows : [{ purpose: "Reseller onboarding", name: "", phone: "", email: "" }];
+}
+
+function authorizationStatusClass(status) {
+  if (status === "Accepted") return "success";
+  if (status === "Rejected") return "error";
+  return "warn";
+}
+
+function authorizationSummary(request, perspective) {
+  const partyName = perspective === "oem" ? request.vendorName : request.oemName;
+  return `
+    <div class="collaboration-head">
+      <div><span class="status-pill ${authorizationStatusClass(request.status)}">${escapeHtml(request.status)}</span><h3>${escapeHtml(partyName || "Dome member")}</h3></div>
+      <span class="request-reference">${escapeHtml(request.reference || request.id.slice(0, 8).toUpperCase())}</span>
+    </div>
+    <div class="authorization-grid">
+      <div><span>Category</span><strong>${escapeHtml(request.category || "Not specified")}</strong></div>
+      <div><span>Brand / OEM</span><strong>${escapeHtml(request.brand || request.oemName || "Not specified")}</strong></div>
+      <div><span>GeM Seller ID</span><strong>${escapeHtml(request.gemSellerId || "Pending")}</strong></div>
+      <div><span>Territory</span><strong>${escapeHtml(request.territory || [request.city, request.state].filter(Boolean).join(", ") || "Not specified")}</strong></div>
+      <div><span>GeM orders completed</span><strong>${Number(request.ordersCompleted || 0).toLocaleString("en-IN")}</strong></div>
+      <div><span>Submitted</span><strong>${new Date(request.createdAt).toLocaleDateString("en-IN")}</strong></div>
+      ${request.authorizationNumber ? `<div><span>Authorization number</span><strong>${escapeHtml(request.authorizationNumber)}</strong></div>` : ""}
+      ${request.authorizationAgency ? `<div><span>Authorization agency</span><strong>${escapeHtml(request.authorizationAgency)}</strong></div>` : ""}
+      ${request.authorizationDate ? `<div><span>Authorization date</span><strong>${new Date(request.authorizationDate).toLocaleDateString("en-IN")}</strong></div>` : ""}
+      ${request.validFrom ? `<div><span>Valid from</span><strong>${new Date(request.validFrom).toLocaleDateString("en-IN")}</strong></div>` : ""}
+      ${request.validTo ? `<div><span>Valid to</span><strong>${new Date(request.validTo).toLocaleDateString("en-IN")}</strong></div>` : ""}
+    </div>
+    ${request.requestedProducts ? `<div class="request-scope"><span>Products / scope requested</span><p>${escapeHtml(request.requestedProducts)}</p></div>` : ""}
+    <div class="collaboration-timeline">${(request.timeline || []).map((item) => `<div><span class="timeline-marker"></span><p><strong>${escapeHtml(item.stage)}</strong><small>${escapeHtml(item.by || "Dome")} · ${new Date(item.at).toLocaleDateString("en-IN")}</small></p></div>`).join("")}</div>
+  `;
 }
 
 function currentOemPlan(entity = {}) {
@@ -698,6 +750,8 @@ function profilePage(id) {
   if (!business) return shell(`<main class="page"><div class="container empty">Profile not found.</div></main>`);
   const isOem = business.type === "OEM";
   const isOwner = Boolean(state.user?.businessId && state.user.businessId === business.id);
+  const isResellerMember = state.user?.role === "Reseller" || state.user?.role === "Vendor";
+  const canRequestAuthorization = isOem && !isOwner && isResellerMember;
   const revealed = state.revealedContacts[business.id];
   const plan = isOem ? currentOemPlan(business) : null;
   const productLimit = plan?.productLimit || business.productLimit || (business.products || []).length;
@@ -719,15 +773,17 @@ function profilePage(id) {
             </div>
             <p>${escapeHtml(business.description)}</p>
             <div class="hero-actions">
-              ${isOem && revealed ? `<a class="button" href="#/request-authorization/${business.id}">Request authorization</a>` : ""}
-              ${isOem && !revealed && !isOwner && state.user ? `<button class="button secondary" data-action="reveal-contact" data-business-id="${business.id}">Start authorization request - ${money(state.boot.config.revealBundlePrice)} / ${state.boot.config.revealBundleCredits} OEMs</button>` : ""}
+              ${canRequestAuthorization && revealed ? `<a class="button" href="#/request-authorization/${business.id}">Request authorization</a>` : ""}
+              ${canRequestAuthorization && !revealed ? `<button class="button secondary" data-action="reveal-contact" data-business-id="${business.id}">Start authorization request - ${money(state.boot.config.revealBundlePrice)} / ${state.boot.config.revealBundleCredits} OEMs</button>` : ""}
               ${isOem && !revealed && !isOwner && !state.user ? `<a class="button" href="#/login?next=${encodeURIComponent(`/profile/${business.id}`)}">Request authorization through Dome</a>` : ""}
               ${isOem && isOwner ? `<a class="button secondary" href="#/profile-setup">Edit microsite</a>` : ""}
-              ${!isOem ? `<a class="button secondary" href="#/contact/${business.id}">Send enquiry</a>` : ""}
+              ${!isOem && state.user?.role === "Buyer" ? `<a class="button secondary" href="#/contact/${business.id}">Send enquiry</a>` : ""}
             </div>
             <div id="revealNotice" class="profile-message">
-              ${isOem && !revealed && !isOwner ? `<p class="notice warn">${state.user ? "Start a paid authorization request and send it directly to the OEM for review." : "Enter your mobile number to continue. Existing members sign in; new members create an account in the same flow."}</p>` : ""}
-              ${isOem && revealed ? `<p class="notice success"><strong>Authorization form unlocked.</strong><br>Submit your request directly to the OEM for approval.</p>` : ""}
+              ${canRequestAuthorization && !revealed ? `<p class="notice warn">Start a paid authorization request and send your GeM reseller profile directly to the OEM for review.</p>` : ""}
+              ${canRequestAuthorization && revealed ? `<p class="notice success"><strong>Authorization form unlocked.</strong><br>Submit your category and reseller details to the OEM.</p>` : ""}
+              ${isOem && state.user?.role === "Member" ? `<p class="notice warn">Choose Reseller as your profile type and add your GeM Seller ID before requesting authorization.</p>` : ""}
+              ${isOem && state.user && !isOwner && !isResellerMember && state.user.role !== "Member" ? `<p class="notice">Authorization requests are available to verified Reseller profiles. You are viewing this page as ${escapeHtml(state.user.role)}.</p>` : ""}
             </div>
           </div>
           <div class="big-avatar">${escapeHtml(business.initials)}</div>
@@ -837,10 +893,11 @@ function learnArticlePage(slug) {
         <p class="eyebrow">${escapeHtml(item.kind || item.tag)} · ${item.minutes} min read</p>
         <h1>${escapeHtml(item.title)}</h1>
         <p>${escapeHtml(item.intro)}</p>
-        <div class="tags"><span class="tag dark">For ${escapeHtml(item.audience)}</span></div>
+        <div class="tags"><span class="tag dark">For ${escapeHtml(item.audience)}</span>${item.updated ? `<span class="tag">Reviewed ${escapeHtml(item.updated)}</span>` : ""}</div>
       </header>
       <div class="container article-layout">
         <article class="article-body">
+          ${item.takeaways?.length ? `<section class="article-takeaways"><p class="eyebrow">At a glance</p><h2>What you should leave with</h2><ul>${item.takeaways.map((takeaway) => `<li>${escapeHtml(takeaway)}</li>`).join("")}</ul></section>` : ""}
           ${item.sections.map((section) => `
             <section>
               <h2>${escapeHtml(section.title)}</h2>
@@ -1075,15 +1132,14 @@ function dashboardPage() {
               </div>
             </div>
             ${state.authorizationRequests.length ? `
-              <div class="grid three">${state.authorizationRequests.map((request) => `
-                <article class="card status-card">
-                  <span class="tag dark">${escapeHtml(request.status)}</span>
-                  <h3>${escapeHtml(request.oemName)}</h3>
-                  <p>${request.status === "Accepted"
-                    ? `Accepted by the OEM for ${escapeHtml(request.category)}. Dome will add the contact-routing step once that workflow is finalized.`
-                    : request.status === "Declined"
-                      ? `The OEM declined this ${escapeHtml(request.category)} request. You can review the category fit before trying again.`
-                      : `${escapeHtml(request.category)} request submitted ${new Date(request.createdAt).toLocaleDateString()} and awaiting OEM review.`}</p>
+              <div class="collaboration-list">${state.authorizationRequests.map((request) => `
+                <article class="card collaboration-record">
+                  ${authorizationSummary(request, "reseller")}
+                  <p class="notice ${authorizationStatusClass(request.status)}">${request.status === "Accepted"
+                    ? "The OEM has accepted this collaboration. The authorization details above are the shared working record for the next GeM step."
+                    : request.status === "Rejected"
+                      ? "The OEM has rejected this request. Review category fit or profile readiness before opening a new request."
+                      : "The OEM is reviewing your GeM identity, category fit and operating profile."}</p>
                   <a class="inline-link" href="#/profile/${escapeHtml(request.oemId)}">Open OEM profile</a>
                 </article>
               `).join("")}</div>
@@ -1101,18 +1157,20 @@ function dashboardPage() {
               </div>
             </div>
             ${state.authorizationRequests.length ? `
-              <div class="grid three">${state.authorizationRequests.map((request) => `
-                <article class="card status-card">
-                  <span class="tag dark">${escapeHtml(request.status)}</span>
-                  <h3>${escapeHtml(request.vendorName || "Dome reseller")}</h3>
-                  <p><strong>${escapeHtml(request.category)}</strong><br>Submitted ${new Date(request.createdAt).toLocaleDateString()} by ${escapeHtml(request.contactName || "verified reseller contact")}.</p>
-                  ${request.status === "Requested" ? `
-                    <p class="muted">Approve or decline this request as the OEM. Contact exchange will be added as a separate routed step.</p>
-                    <div class="form-actions compact">
-                      <button class="button small" type="button" data-authorization-action="Accepted" data-authorization-id="${escapeHtml(request.id)}">Accept</button>
-                      <button class="button small danger" type="button" data-authorization-action="Declined" data-authorization-id="${escapeHtml(request.id)}">Decline</button>
+              <div class="collaboration-list">${state.authorizationRequests.map((request) => `
+                <article class="card collaboration-record">
+                  ${authorizationSummary(request, "oem")}
+                  <form class="authorization-decision" data-authorization-decision data-authorization-id="${escapeHtml(request.id)}">
+                    <div class="decision-head"><div><h4>OEM decision</h4><p>Keep this record aligned with the authorization maintained for the reseller.</p></div><label><span class="label">Status</span><select class="select" name="status">${["Under Consideration", "Accepted", "Rejected"].map((status) => `<option ${request.status === status ? "selected" : ""}>${status}</option>`).join("")}</select></label></div>
+                    <div class="form-grid authorization-fields">
+                      <label><span class="label">Authorization number</span><input class="input" name="authorizationNumber" value="${escapeHtml(request.authorizationNumber || "")}"></label>
+                      <label><span class="label">Authorization agency</span><input class="input" name="authorizationAgency" value="${escapeHtml(request.authorizationAgency || state.user.businessName || "")}"></label>
+                      <label><span class="label">Authorization date</span><input class="input" name="authorizationDate" type="date" value="${escapeHtml(request.authorizationDate || "")}"></label>
+                      <label><span class="label">Valid from</span><input class="input" name="validFrom" type="date" value="${escapeHtml(request.validFrom || "")}"></label>
+                      <label><span class="label">Valid to</span><input class="input" name="validTo" type="date" value="${escapeHtml(request.validTo || "")}"></label>
                     </div>
-                  ` : `<p class="notice ${request.status === "Accepted" ? "success" : "warn"}">${request.status === "Accepted" ? "Accepted. Contact routing is the next workflow to define." : "Declined by your OEM team."}</p>`}
+                    <div class="form-actions"><button class="button" type="submit">Save collaboration decision</button></div>
+                  </form>
                 </article>
               `).join("")}</div>
             ` : `<div class="empty">No incoming authorization requests yet. New reseller requests for your OEM profile will appear here.</div>`}
@@ -1126,9 +1184,12 @@ function dashboardPage() {
 function profileSetupPage() {
   if (!state.user) return loginPage();
   const draft = state.profileDraft || state.profile || {};
-  const role = draft.role || (state.user.role === "OEM" ? "OEM" : state.user.role === "Buyer" ? "Buyer" : "Reseller");
+  const accountRole = ["OEM", "Reseller", "Buyer"].includes(state.user.role) ? state.user.role : "";
+  const role = draft.role || accountRole;
+  const hasRole = Boolean(role);
   const isOem = role === "OEM";
-  const needsGst = role === "OEM" || role === "Reseller";
+  const isReseller = role === "Reseller";
+  const needsGst = isOem;
   const plan = isOem ? currentOemPlan(state.profile || draft) : null;
   const plans = oemPlans();
   const savedProducts = draft.products || state.profile?.products || [];
@@ -1139,17 +1200,15 @@ function profileSetupPage() {
   const lookupGst = pickGstValue(state.gstLookup?.result, ["gstin", "gstNumber"]);
   const gstVerified = Boolean(state.gstLookup && state.gstLookupStatus === "verified" && (!lookupGst || lookupGst === draftGst));
   const hasSavedProfile = Boolean(state.profile?.completion);
-  const showDetails = !needsGst || !gstAutoEnabled || gstVerified || hasSavedProfile;
+  const showDetails = hasRole && (!needsGst || !gstAutoEnabled || gstVerified || hasSavedProfile);
   const lookingForCategories = Array.isArray(draft.lookingForCategories) ? draft.lookingForCategories.join(", ") : String(draft.lookingForCategories || "");
-  const contactList = Array.isArray(draft.contactList)
-    ? draft.contactList.map((item) => [item.purpose, item.name, item.phone, item.email].filter(Boolean).join(" | ")).join("\n")
-    : String(draft.contactList || "");
+  const contactRows = contactEditorRows(draft.contactList || []);
   return shell(`
     <main class="page">
       <header class="page-head">
         <p class="eyebrow">Profile setup</p>
-        <h1>Complete your ${escapeHtml(role)} profile.</h1>
-        <p>Choose your role and verify the GST-registered business first. Dome then opens the fields relevant to that profile.</p>
+        <h1>${hasRole ? `Complete your ${escapeHtml(role)} profile.` : "Choose how you work on GeM."}</h1>
+        <p>${hasRole ? "Dome now shows only the business information and collaboration tools relevant to your role." : "Your account is verified but unclassified. Choose the role that best describes your work; nothing is selected for you."}</p>
       </header>
       <div class="container split">
         <form class="card profile-form" id="profileForm">
@@ -1163,20 +1222,24 @@ function profileSetupPage() {
                 ["Buyer", "Discover suppliers and product coverage"]
               ].map(([item, description]) => `<label class="role-option ${item === role ? "active" : ""}"><input type="radio" name="role" value="${item}" data-profile-role ${item === role ? "checked" : ""}><span><strong>${item}</strong><small>${description}</small></span></label>`).join("")}
             </div>
-            <div class="gst-priority">
-              <div class="profile-step-head"><span class="step-dot">2</span><div><h2>${needsGst ? "Verify the business GSTIN" : "Add a GSTIN, if applicable"}</h2><p>${needsGst ? "The remaining business profile opens after Dome confirms this record." : "Buyer profiles can continue without GST verification."}</p></div></div>
-              <label><span class="label">GST Number${needsGst ? "" : " (optional)"}</span><input class="input gst-input" name="gstNumber" maxlength="15" ${needsGst ? "required" : ""} ${gstAutoEnabled ? "data-gst-auto" : ""} value="${escapeHtml(draftGst)}" placeholder="15-character GSTIN"><span id="gstLookupNotice" class="field-note" aria-live="polite">${state.gstLookupStatus === "loading" ? "Checking GST registration..." : gstVerified ? "GST record verified." : gstAutoEnabled ? "Enter all 15 characters to verify automatically." : "Automatic lookup is not connected. Enter the registered details manually."}</span></label>
-            </div>
+            ${isOem ? `<div class="gst-priority">
+              <div class="profile-step-head"><span class="step-dot">2</span><div><h2>Verify the OEM business GSTIN</h2><p>Dome uses the registration record to begin the OEM profile and microsite.</p></div></div>
+              <label><span class="label">GST Number</span><input class="input gst-input" name="gstNumber" maxlength="15" required ${gstAutoEnabled ? "data-gst-auto" : ""} value="${escapeHtml(draftGst)}" placeholder="15-character GSTIN"><span id="gstLookupNotice" class="field-note" aria-live="polite">${state.gstLookupStatus === "loading" ? "Checking GST registration..." : gstVerified ? "GST record verified." : gstAutoEnabled ? "Enter all 15 characters to verify automatically." : "Automatic lookup is not connected. Enter the registered details manually."}</span></label>
+            </div>` : ""}
+            ${isReseller ? `<div class="gem-priority">
+              <div class="profile-step-head"><span class="step-dot">2</span><div><h2>Start with your GeM Seller ID</h2><p>This is the primary identity OEMs will use when reviewing your collaboration requests.</p></div></div>
+              <label><span class="label">GeM Seller ID</span><input class="input gem-id-input" name="gemSellerId" required value="${escapeHtml(draft.gemSellerId || "")}" placeholder="Enter the Seller ID shown in your GeM profile"></label>
+            </div>` : ""}
           </section>
-          ${showDetails ? `<section class="profile-details"><div class="profile-step-head"><span class="step-dot">3</span><div><h2>${escapeHtml(role)} details</h2><p>Your verified business information and role-specific operating details.</p></div></div><div class="form-grid">
+          ${showDetails ? `<section class="profile-details"><div class="profile-step-head"><span class="step-dot">${isOem || isReseller ? "3" : "2"}</span><div><h2>${escapeHtml(role)} details</h2><p>Your business information and role-specific operating details.</p></div></div><div class="form-grid">
             <label><span class="label">Business / organization name</span><input class="input" name="businessName" required value="${escapeHtml(draft.businessName || "")}"></label>
             <label><span class="label">Orders completed on GeM</span><input class="input" name="ordersCompleted" type="number" min="0" value="${escapeHtml(draft.ordersCompleted || "")}"></label>
             <label><span class="label">State</span><input class="input" name="state" value="${escapeHtml(draft.state || "")}"></label>
             <label><span class="label">City</span><input class="input" name="city" value="${escapeHtml(draft.city || "")}"></label>
             <label><span class="label">Contact person</span><input class="input" name="contactPerson" value="${escapeHtml(draft.contactPerson || "")}"></label>
             ${role === "Reseller" ? `
-              <label><span class="label">GeM seller ID</span><input class="input" name="gemSellerId" value="${escapeHtml(draft.gemSellerId || "")}"></label>
               <label class="full"><span class="label">OEM categories looking for</span><input class="input" name="lookingForCategories" placeholder="Printer Cartridges, IT Hardware" value="${escapeHtml(lookingForCategories)}"></label>
+              <label class="full"><span class="label">GST Number</span><input class="input" name="gstNumber" maxlength="15" ${gstAutoEnabled ? "data-gst-auto" : ""} value="${escapeHtml(draftGst)}" placeholder="15-character GSTIN"><span id="gstLookupNotice" class="field-note" aria-live="polite">${state.gstLookupStatus === "loading" ? "Checking GST registration..." : gstVerified ? "GST record verified and business fields updated." : "Optional here. Enter a valid GSTIN to fill registered business details."}</span></label>
             ` : ""}
             ${role === "OEM" ? `
               <label><span class="label">GeM listing/profile link</span><input class="input" name="gemLink" type="url" value="${escapeHtml(draft.gemLink || "")}"></label>
@@ -1199,10 +1262,19 @@ function profileSetupPage() {
                   `).join("")}
                 </div>
               </div>
-              <label class="full"><span class="label">Contact list</span><textarea class="textarea" name="contactList" placeholder="Purpose | Name | Phone | Email">${escapeHtml(contactList)}</textarea></label>
+              <div class="full contact-editor">
+                <div class="section-head compact"><div><h3>Business contacts</h3><p class="muted">Add the right person for reseller onboarding, sales, service or accounts.</p></div><button class="button small secondary" type="button" data-action="add-contact-row">Add contact</button></div>
+                <div class="contact-row-list">${contactRows.map((contact, index) => `<div class="contact-row" data-contact-row>
+                  <label><span class="label">Purpose</span><select class="select" name="contactPurpose">${["Reseller onboarding", "Government sales", "Product support", "Accounts", "Other"].map((purpose) => `<option ${contact.purpose === purpose ? "selected" : ""}>${purpose}</option>`).join("")}</select></label>
+                  <label><span class="label">Contact name</span><input class="input" name="contactName" value="${escapeHtml(contact.name)}"></label>
+                  <label><span class="label">Mobile</span><input class="input" name="contactPhone" inputmode="tel" value="${escapeHtml(contact.phone)}"></label>
+                  <label><span class="label">Email</span><input class="input" name="contactEmail" type="email" value="${escapeHtml(contact.email)}"></label>
+                  ${contactRows.length > 1 ? `<button class="button small danger" type="button" data-action="remove-contact-row" data-contact-index="${index}">Remove</button>` : ""}
+                </div>`).join("")}</div>
+              </div>
             ` : ""}
             <label class="full"><span class="label">About the business</span><textarea class="textarea" name="about">${escapeHtml(draft.about || "")}</textarea></label>
-          </div></section>` : `<div class="gst-gate-placeholder"><strong>Verify the GSTIN to continue</strong><p>Dome will use the confirmed registration record to start the ${escapeHtml(role)} profile.</p></div>`}
+          </div></section>` : hasRole ? `<div class="gst-gate-placeholder"><strong>Verify the GSTIN to continue</strong><p>Dome will use the confirmed registration record to start the OEM profile.</p></div>` : `<div class="role-gate-placeholder"><strong>Select a role to continue</strong><p>Your profile fields and dashboard will be created only after you choose.</p></div>`}
           <div class="form-actions">
             ${showDetails ? `<button class="button" type="submit">Save profile</button>` : ""}
           </div>
@@ -1212,9 +1284,9 @@ function profileSetupPage() {
             <h2>Profile completion</h2>
             <p class="notice">${state.profile?.completion || 0}% complete. Profiles above 80% become review-ready for directory and partnership workflows.</p>
           </div>
-          <div class="card">
+          ${hasRole ? `<div class="card">
             <h2>GST verification</h2>
-            <p>${gstAutoEnabled ? "Enter a valid GSTIN and Dome will fill only the business fields returned by the connected GST provider." : "No GST provider is connected, so Dome will not guess or fabricate business information. Enter the details exactly as they appear on the GST registration."}</p>
+            <p>${isOem ? "OEM onboarding uses the GST record as the registered-business foundation." : isReseller ? "GeM Seller ID comes first for reseller collaboration. GST can still fill the registered business details." : "GST is optional for a Buyer profile."}</p>
             ${gstVerified ? `
               <div class="notice success gst-summary">
                 <strong>${escapeHtml(pickGstValue(state.gstLookup.result, ["tradeName", "tradeNam", "legalName", "lgnm"]))}</strong>
@@ -1222,7 +1294,7 @@ function profileSetupPage() {
                 <span>${escapeHtml(pickGstValue(state.gstLookup.result, ["constitution", "constitutionOfBusiness", "ctb"]))}</span>
                 <span>${escapeHtml(pickGstValue(state.gstLookup.result, ["registrationDate", "rgdt"]))}</span>
               </div>` : ""}
-          </div>
+          </div>` : ""}
           ${isOem ? `
             <div class="card plan-panel">
               <div class="plan-head">
@@ -1270,6 +1342,12 @@ function simpleFormPage(kind, id = "") {
   }
 
   if (kind === "authorization" && business) {
+    if (!state.user || !["Reseller", "Vendor"].includes(state.user.role)) {
+      return shell(`<main class="page"><div class="container split"><header class="page-head"><p class="eyebrow">Reseller collaboration</p><h1>Complete a Reseller profile first.</h1><p>OEM authorization requests use the reseller's GeM Seller ID, business coverage and operating record.</p><a class="button" href="${state.user ? "#/profile-setup" : `#/login?next=${encodeURIComponent(`/profile/${business.id}`)}`}">${state.user ? "Choose Reseller profile" : "Log in to continue"}</a></header></div></main>`);
+    }
+    if (!state.profile?.gemSellerId) {
+      return shell(`<main class="page"><div class="container split"><header class="page-head"><p class="eyebrow">GeM Seller ID required</p><h1>Add your reseller identity before requesting authorization.</h1><p>The OEM will use this ID when reviewing and recording the collaboration.</p><a class="button" href="#/profile-setup">Complete Reseller profile</a></header></div></main>`);
+    }
     if (!state.revealedContacts[business.id]) {
       return shell(`
         <main class="page">
@@ -1286,6 +1364,7 @@ function simpleFormPage(kind, id = "") {
     }
     const resellerName = state.profile?.businessName || state.user?.businessName || "";
     const contactName = state.profile?.contactPerson || "";
+    const territory = [state.profile?.city, state.profile?.state].filter(Boolean).join(", ");
     const preferredCategories = state.profile?.lookingForCategories || [];
     const categoryOptions = [...new Set([business.category, ...preferredCategories, ...state.boot.categories])];
     return shell(`
@@ -1297,7 +1376,14 @@ function simpleFormPage(kind, id = "") {
             <span class="avatar small-avatar">${escapeHtml((resellerName || "D").split(/\s+/).map((part) => part[0]).join("").slice(0, 2))}</span>
             <div><strong>${escapeHtml(resellerName)}</strong><p>${escapeHtml(contactName || "Profile contact")} · ${escapeHtml(state.user?.email || "")} · ${escapeHtml(state.user?.phone || "")}</p></div>
           </div>
+          <div class="authorization-grid request-preview">
+            <div><span>Brand / OEM</span><strong>${escapeHtml(business.name)}</strong></div>
+            <div><span>GeM Seller ID</span><strong>${escapeHtml(state.profile.gemSellerId)}</strong></div>
+            <div><span>Territory</span><strong>${escapeHtml(territory || "Add in profile")}</strong></div>
+            <div><span>Orders completed</span><strong>${Number(state.profile.ordersCompleted || 0).toLocaleString("en-IN")}</strong></div>
+          </div>
           <label><span class="label">Product category</span><select class="select" name="category" required>${categoryOptions.map((cat) => `<option>${escapeHtml(cat)}</option>`).join("")}</select></label>
+          <label><span class="label">Products or authorization scope</span><textarea class="textarea" name="requestedProducts" placeholder="Product families or catalogue scope you want to represent"></textarea></label>
           <p class="muted">Need to change these details? <a class="inline-link" href="#/profile-setup">Update your profile</a> before submitting.</p>
           <div class="form-actions"><button class="button" type="submit">Send authorization request</button></div>
         </form>
@@ -1417,6 +1503,7 @@ function formPayload(form) {
   if (form.id === "profileForm") {
     const products = productRowsFromForm(form);
     if (products.length) payload.products = products;
+    if (form.querySelector("[data-contact-row]")) payload.contactList = contactRowsFromForm(form);
   }
   for (const checkbox of form.querySelectorAll('input[type="checkbox"]')) {
     payload[checkbox.name] = checkbox.checked;
@@ -1461,6 +1548,7 @@ async function onSubmit(event) {
       state.profile = result.profile;
       state.profileDraft = null;
       state.productDraftRows = null;
+      state.contactDraftRows = null;
       localStorage.setItem("domeUser", JSON.stringify(result.user));
       const returnTo = localStorage.getItem("domePostProfileRoute") || "";
       localStorage.removeItem("domePostProfileRoute");
@@ -1480,6 +1568,14 @@ async function onSubmit(event) {
       const result = await api("/api/authorization", { method: "POST", body: JSON.stringify(payload) });
       state.authorizationRequests = [result.request, ...state.authorizationRequests.filter((request) => request.id !== result.request.id)];
       setRoute("/dashboard");
+    }
+    if (form.matches("[data-authorization-decision]")) {
+      const result = await api(`/api/authorization/${form.dataset.authorizationId}/status`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      state.authorizationRequests = state.authorizationRequests.map((request) => request.id === result.request.id ? result.request : request);
+      render();
     }
     if (form.id === "webinarForm") {
       payload.webinarId = form.dataset.webinarId;
@@ -1515,6 +1611,7 @@ async function handleClick(event) {
     state.authorizationRequests = [];
     state.profileDraft = null;
     state.productDraftRows = null;
+    state.contactDraftRows = null;
     state.gstLookup = null;
     state.gstLookupTarget = "";
     state.gstLookupStatus = "idle";
@@ -1645,6 +1742,24 @@ async function handleClick(event) {
     rows.splice(index, 1);
     state.profileDraft = { ...(state.profileDraft || state.profile || {}), ...formPayload(form), products: rows };
     state.productDraftRows = rows.length ? rows : [{ name: "", gemUrl: "", category: "" }];
+    render();
+    return;
+  }
+  if (action === "add-contact-row") {
+    const form = document.querySelector("#profileForm");
+    const contacts = contactRowsFromForm(form);
+    state.profileDraft = { ...(state.profileDraft || state.profile || {}), ...formPayload(form), contactList: contacts };
+    state.contactDraftRows = [...contacts, { purpose: "Reseller onboarding", name: "", phone: "", email: "" }];
+    render();
+    return;
+  }
+  if (action === "remove-contact-row") {
+    const form = document.querySelector("#profileForm");
+    const index = Number(event.target.closest("[data-contact-index]")?.dataset.contactIndex || 0);
+    const contacts = contactRowsFromForm(form);
+    contacts.splice(index, 1);
+    state.profileDraft = { ...(state.profileDraft || state.profile || {}), ...formPayload(form), contactList: contacts };
+    state.contactDraftRows = contacts.length ? contacts : [{ purpose: "Reseller onboarding", name: "", phone: "", email: "" }];
     render();
     return;
   }

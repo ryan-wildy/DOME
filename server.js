@@ -355,6 +355,97 @@ const content = {
   ]
 };
 
+const learnUpgrades = {
+  "seller-registration-readiness": {
+    minutes: 12,
+    updated: "July 2026",
+    summary: "Build a registration pack that keeps personal identity, organization records, tax data and the intended seller journey aligned from day one.",
+    intro: "A GeM account becomes useful only when the person creating it, the legal entity behind it and the records used later for catalogue, bids and orders all agree. This guide turns registration into a controlled readiness exercise rather than a sequence of corrections.",
+    takeaways: ["Know who should create the primary seller account", "Prepare the organization record before the first login", "Separate account creation from catalogue and bid readiness", "Never pay a third party for GeM registration"],
+    sections: [
+      { title: "Choose the correct authorized person", paragraphs: ["GeM's published prerequisites identify the account creator as an authorized person such as a proprietor, partner, director or another permitted key person. Decide this before registration because personal Aadhaar or PAN verification, mobile access and email ownership sit with that person."], bullets: ["Confirm authority under the entity's constitution", "Use an active mobile number controlled by the authorized person", "Match personal PAN name and date of birth exactly", "Use an email account that can be retained and recovered"] },
+      { title: "Assemble the organization master", paragraphs: ["Create one reviewed source sheet for the legal name, constitution, organization PAN, incorporation or registration date, registered address, CIN where applicable and bank information. Differences in spelling, dates or entity type create avoidable friction later."], bullets: ["Legal and trade name", "Business constitution", "Organization PAN", "Incorporation or registration date", "CIN for companies", "Registered and operating addresses", "Bank account and IFSC"] },
+      { title: "Understand where ITR fits", paragraphs: ["The published prerequisite note says verified ITR details are relevant for Bid and Reverse Auction participation, with stated exceptions for newer entities or entities exempt from filing. Treat this as a participation-readiness item and verify the current rule on GeM for the entity before bidding."] },
+      { title: "Move through the seller journey in order", bullets: ["Create and secure the seller account", "Complete the organization profile", "Set internal users and responsibilities", "Add products or services through the applicable catalogue route", "Prepare separately for Bid/RA participation", "Prepare order fulfilment ownership before pursuing business"] },
+      { title: "Run a ten-minute quality check", paragraphs: ["Before confirming any fetched or entered record, compare it against the source document. Keep a dated registration pack and record who approved it internally. Dome can hold the readiness record and partner context; official registration, catalogue, bid and order actions remain on GeM."], bullets: ["Names and dates match source records", "Mobile and email can receive verification", "Entity type is correct", "No one has been paid for registration", "Internal owner is assigned for the next step"] }
+    ]
+  },
+  "vendor-assessment-readiness": {
+    minutes: 14,
+    updated: "July 2026",
+    summary: "Prepare the evidence, facility and internal owners needed for a consistent desktop and video assessment.",
+    intro: "Vendor Assessment is not a document-upload contest. The submitted profile, financial evidence, production capability and the facility shown during validation must tell the same story.",
+    takeaways: ["Organize evidence around location, financial capacity and production capability", "Make every claim traceable to a source record", "Rehearse the facility walkthrough before video assessment", "Close inconsistencies before submission"],
+    sections: [
+      { title: "Map the assessment to three evidence rooms", paragraphs: ["GeM's published methodology groups OEM assessment around physical location, financial capacity and production capability. Build a folder for each area, with an index that names the document, period, owner and claim it supports."] },
+      { title: "Make the desktop assessment reviewable", bullets: ["Use current entity and facility records", "Keep financial documents for the same legal entity", "Show production flow from input to finished product", "Link machinery and testing evidence to declared products", "Keep brand and catalogue evidence consistent with GeM"] },
+      { title: "Prepare the video assessment", paragraphs: ["The official manual describes video assessment as validation of the process and facility represented in the desktop submission. Plan the route, connectivity, permissions and people required to show the declared capability without improvisation."], bullets: ["Test mobile connectivity across the facility", "Identify the person who can explain each process", "Make machinery identifiers and records accessible", "Prepare safe access to production and quality-control areas", "Keep original or verifiable records available"] },
+      { title: "Treat non-compliance as a controlled response", paragraphs: ["When a clarification or non-compliance observation is raised, answer the exact point with the exact record. Avoid broad explanations that introduce new contradictions. Record the issue, owner, response and closure evidence."] },
+      { title: "Use assessment readiness commercially", paragraphs: ["A clean capability record is also useful for reseller onboarding. OEMs can reuse approved descriptions, product scope, quality processes and support information in Dome microsites and sales kits without exposing confidential assessment material."] }
+    ]
+  },
+  "oem-authorization-workflow": {
+    minutes: 13,
+    updated: "July 2026",
+    summary: "Turn a reseller request into a traceable GeM collaboration record with identity, category, scope, validity and a decision timeline.",
+    intro: "Authorization should be managed as a living OEM-reseller relationship. The useful record is not only an approval: it captures who the reseller is on GeM, what category and brand are covered, who authorized it and how long it remains valid.",
+    takeaways: ["Start with the reseller's GeM Seller ID", "Define category and product scope precisely", "Record authorization number, agency and validity when issued", "Keep the same status visible to both parties"],
+    sections: [
+      { title: "The reseller request pack", bullets: ["Verified business name and GeM Seller ID", "Category and products requested", "State, city or operating territory", "Relevant GeM order experience", "Named business contact held privately by Dome", "Reasonable evidence requested by the OEM for category fit"] },
+      { title: "The OEM review", paragraphs: ["Review identity before reach. A large order count does not replace category fit, support capability or sourcing discipline. Use Under Consideration while the team validates the request, then make an explicit Accepted or Rejected decision."], bullets: ["Confirm Seller ID and business identity", "Check category and product fit", "Review territory and fulfilment capability", "Assign an internal authorization owner", "Define any limitations before acceptance"] },
+      { title: "The shared authorization record", paragraphs: ["The GeM OEM panel shown to Dome includes fields such as category, brand, authorization number, authorization agency, authorization date, validity period and GeM Seller ID. Dome mirrors this operating structure so the OEM and reseller can work from one shared record while the official action remains on GeM."], bullets: ["Category", "Brand", "Authorization number", "Authorization agency", "Authorization date", "Valid from and valid to", "GeM Seller ID"] },
+      { title: "Status means something", bullets: ["Under Consideration: the OEM is validating identity, category or capability", "Accepted: the OEM has approved the collaboration and can record authorization details", "Rejected: the OEM has closed this request; the reseller should review fit before a fresh request"] },
+      { title: "Keep catalogue obligations separate", paragraphs: ["Authorization does not remove the need to follow the current catalogue route, category conditions, sourcing obligations, warranty responsibilities or GeM terms. Confirm the live category rule and complete the official OEM or reseller action on GeM."] }
+    ]
+  },
+  "gem-catalogue-quadrants": {
+    minutes: 11,
+    updated: "July 2026",
+    summary: "Use category configuration to decide who may create, pair or offer a catalogue and what evidence the reseller must retain.",
+    intro: "The quadrant is an operating rule for a specific category, not a permanent label for a business. The same seller may encounter different participation routes across categories, so every decision starts with the live category configuration.",
+    takeaways: ["Check the exact category, not a broad product family", "Do not assume one quadrant applies everywhere", "Separate catalogue eligibility from bid eligibility", "Retain sourcing, warranty and authorization evidence"],
+    sections: [
+      { title: "A practical reading of Q1 to Q4", bullets: ["Q1 generally centers catalogue participation on the OEM", "Q2 generally involves OEMs and OEM-authorized resellers", "Q3 permits a broader concurrent OEM or reseller route subject to applicable requirements", "Q4 permits OEM and reseller participation subject to the category and GeM obligations"] },
+      { title: "Start with the exact category", paragraphs: ["Search the exact category and inspect the current participation route before building a catalogue or committing to a bid. Product similarity is not enough: category configuration, specifications and required credentials can differ."] },
+      { title: "Authorization and undertaking are not interchangeable habits", paragraphs: ["Where GeM terms provide different routes for authorized and non-authorized resellers, understand the consequence of the route being used. A reseller remains responsible for genuine sourcing, chain documents, warranty and the claims made in the catalogue or bid."] },
+      { title: "The pre-bid control list", bullets: ["Exact category and current quadrant", "Catalogue ownership or pairing route", "OEM approval status", "Required undertaking or declarations", "Source and supply-chain evidence", "Warranty and service responsibility", "Bid-specific eligibility and buyer-added terms"] },
+      { title: "How Dome should be used", paragraphs: ["Use Dome to find the right OEM, keep reseller identity and authorization status visible, and share current product links. Use GeM for the official catalogue, undertaking, bid, order and compliance action."] }
+    ]
+  },
+  "first-order-readiness": {
+    minutes: 13,
+    updated: "July 2026",
+    summary: "Build a bid-to-payment control sheet before pursuing the first order, including catalogue fit, landed economics, delivery and acceptance evidence.",
+    intro: "The first order is won twice: first in a compliant offer, then in fulfilment that survives delivery, acceptance and payment. Readiness means the commercial and operating team agree before a bid is submitted.",
+    takeaways: ["Bid only against a catalogue and specification you can fulfil", "Calculate landed obligations before fixing price", "Assign owners for every order milestone", "Preserve delivery and acceptance evidence"],
+    sections: [
+      { title: "Make the seller account operational", bullets: ["Complete organization, bank and tax information", "Use the correct product or service catalogue", "Keep required experience and eligibility records current", "Assign primary and backup users", "Set an internal bid approval threshold"] },
+      { title: "Read the opportunity as a contract precursor", paragraphs: ["Review specification, quantity, consignee locations, delivery period, eligibility, inspection, warranty, payment and buyer-added terms. Raise questions through the official route where available; do not price around an assumption that changes the obligation."] },
+      { title: "Build landed economics", bullets: ["Product or service cost", "Packing and transport", "Tax treatment", "Installation or commissioning", "Warranty and service visits", "Finance and working-capital period", "Performance security or other applicable commitments", "Risk allowance for the delivery geography"] },
+      { title: "Prepare fulfilment before award", bullets: ["Reserve supply or production capacity", "Confirm consignee and delivery documentation", "Plan inspection and acceptance evidence", "Align invoice data with the order", "Track dispatch, delivery and acceptance milestones", "Escalate exceptions through the official GeM process"] },
+      { title: "Run a post-order review", paragraphs: ["After completion, compare promised and actual margin, dispatch time, acceptance time and payment cycle. Feed the result back into catalogue, pricing and partner decisions before the next bid."] }
+    ]
+  },
+  "oem-reseller-sales-kit": {
+    minutes: 10,
+    updated: "July 2026",
+    summary: "Build a controlled channel pack that gives resellers current product, category, commercial and fulfilment information without version chaos.",
+    intro: "A reseller cannot represent an OEM well with a brochure alone. The useful sales kit connects the product to its GeM category, catalogue link, commercial validity, delivery reality and escalation owner.",
+    takeaways: ["Create one governed source for current channel material", "Link every product to category and GeM listing", "Separate public content from reseller-only commercial material", "Expire old prices and documents deliberately"],
+    sections: [
+      { title: "Build the product truth layer", bullets: ["Product name and model", "GeM category and current listing link", "Specification and approved product copy", "Images and brochure", "Certification or compliance evidence where relevant", "Warranty and service scope"] },
+      { title: "Add the operating layer", bullets: ["Stock or production lead time", "Delivery coverage and exclusions", "Installation requirements", "Escalation contacts by purpose", "Commercial guidance with issue and expiry dates", "Authorization scope and validity where applicable"] },
+      { title: "Design access by audience", paragraphs: ["Public microsite visitors need accurate product and brand information. Authorized resellers may need commercial guidance, sales material and support routes. Keep confidential price or partner material out of the public profile."] },
+      { title: "Govern versions", bullets: ["Give every file an owner", "Show issue and expiry dates", "Archive superseded versions", "Notify active resellers of material changes", "Check links and prices on a fixed cadence"] },
+      { title: "Measure channel usefulness", bullets: ["Time from OEM request to reseller response", "Percentage of current GeM links", "Authorization turnaround time", "Active reseller relationships by category", "Expired price-sheet incidents", "Bid losses caused by missing product information"] }
+    ]
+  }
+};
+
+for (const item of [...content.guides, ...content.articles]) {
+  if (learnUpgrades[item.slug]) Object.assign(item, learnUpgrades[item.slug]);
+}
+
 const webinars = [
   {
     id: "gem-30-days",
@@ -533,6 +624,7 @@ function migrateDb(db) {
   db.paymentOrders ||= [];
   db.auditLog ||= [];
   db.otps ||= [];
+  db.content = content;
   for (const user of db.users) {
     if (user.role === "Vendor") user.role = "Reseller";
     const demoPhoneByEmail = {
@@ -569,6 +661,14 @@ function migrateDb(db) {
       profile.oemPlan = profile.domePlusPaidUntil ? "domePlus" : (profile.oemPlan || "basic");
       profile.products = normalizeProducts(profile.products);
     }
+  }
+  for (const request of db.authorizationRequests) {
+    if (request.status === "Requested") request.status = "Under Consideration";
+    if (request.status === "Declined") request.status = "Rejected";
+    request.timeline = (request.timeline || []).map((item) => ({
+      ...item,
+      stage: item.stage === "Requested" ? "Request submitted" : item.stage === "OEM review" ? "Under Consideration" : item.stage === "Declined" ? "Rejected" : item.stage
+    }));
   }
   db.businesses = db.businesses.filter((business) => !["Dome Demo Seller", "Demo GST verified business"].includes(business.name));
   for (const business of db.businesses) {
@@ -913,6 +1013,19 @@ function authorizationRequestsForUser(db, user) {
       vendorName: request.vendorName,
       contactName: request.contactName,
       category: request.category,
+      brand: request.brand || request.oemName,
+      reference: request.reference || `DOME-${request.id.slice(0, 8).toUpperCase()}`,
+      gemSellerId: request.gemSellerId || "",
+      requestedProducts: request.requestedProducts || "",
+      territory: request.territory || "",
+      city: request.city || "",
+      state: request.state || "",
+      ordersCompleted: Number(request.ordersCompleted || 0),
+      authorizationNumber: request.authorizationNumber || "",
+      authorizationAgency: request.authorizationAgency || "",
+      authorizationDate: request.authorizationDate || "",
+      validFrom: request.validFrom || "",
+      validTo: request.validTo || "",
       status: request.status,
       createdAt: request.createdAt,
       updatedAt: request.updatedAt || request.createdAt,
@@ -1221,7 +1334,7 @@ async function api(req, res, pathname) {
       ? String(crypto.randomInt(100000, 999999))
       : "123456";
     const expiresAt = new Date(Date.now() + OTP_TTL_MS).toISOString();
-    db.otps = db.otps.filter((otp) => (otp.target || otp.phone) !== target || otp.channel !== channel || otp.verified);
+    db.otps = db.otps.filter((otp) => (otp.target || otp.phone) !== target || otp.channel !== channel);
     db.otps.push({ target, channel, codeHash: crypto.createHash("sha256").update(code).digest("hex"), purpose: payload.purpose || "registration", expiresAt, verified: false });
     const result = await sendOtp(target, code, channel);
     await saveDb();
@@ -1241,7 +1354,7 @@ async function api(req, res, pathname) {
     const code = String(payload.code || "").trim();
     if (!/^\d{6}$/.test(code)) return json(res, 422, { error: "Enter the 6-digit verification code." });
     const codeHash = crypto.createHash("sha256").update(code).digest("hex");
-    const record = db.otps.find((otp) => (otp.target || otp.phone) === target && otp.channel === channel && otp.codeHash === codeHash && new Date(otp.expiresAt).getTime() > Date.now());
+    const record = [...db.otps].reverse().find((otp) => (otp.target || otp.phone) === target && otp.channel === channel && otp.codeHash === codeHash && new Date(otp.expiresAt).getTime() > Date.now());
     if (!record) return json(res, 422, { error: "The OTP is invalid or expired." });
     record.verified = true;
     record.verifiedAt = new Date().toISOString();
@@ -1347,14 +1460,17 @@ async function api(req, res, pathname) {
     if (!tokenUser) return json(res, 401, { error: "Sign in required to request OEM authorization." });
     const liveUser = db.users.find((user) => user.id === tokenUser.id);
     if (!liveUser) return json(res, 401, { error: "Session user not found." });
+    if (!["Reseller", "Vendor"].includes(liveUser.role)) return json(res, 403, { error: "Only a completed Reseller profile can request OEM authorization." });
     const payload = await readBody(req);
     const missing = required(payload, ["oemId", "category"]);
     if (missing.length) return json(res, 422, { error: `Missing required fields: ${missing.join(", ")}` });
     const oem = db.businesses.find((item) => item.id === payload.oemId && item.type === "OEM");
     if (!oem) return json(res, 404, { error: "OEM profile not found." });
     const requesterProfile = profileForUser(db, liveUser);
-    const existing = db.authorizationRequests.find((item) => item.userId === liveUser.id && item.oemId === oem.id && !["Declined", "Closed"].includes(item.status));
-    if (existing) return json(res, 200, { ok: true, request: existing, existing: true });
+    if (!requesterProfile || requesterProfile.role !== "Reseller" || !requesterProfile.gemSellerId) return json(res, 422, { error: "Add your GeM Seller ID to the Reseller profile before requesting authorization." });
+    const existing = db.authorizationRequests.find((item) => item.userId === liveUser.id && item.oemId === oem.id && !["Rejected", "Declined", "Closed"].includes(item.status));
+    if (existing) return json(res, 200, { ok: true, request: authorizationRequestsForUser(db, liveUser).find((item) => item.id === existing.id), existing: true });
+    const createdAt = new Date().toISOString();
     const request = {
       id: crypto.randomUUID(),
       userId: liveUser.id,
@@ -1366,14 +1482,22 @@ async function api(req, res, pathname) {
       email: liveUser.email,
       phone: normalizePhone(liveUser.phone),
       category: String(payload.category).trim(),
-      status: "Requested",
-      timeline: [{ stage: "Requested", at: new Date().toISOString(), by: "Reseller" }, { stage: "OEM review", at: new Date().toISOString(), by: oem.name }],
-      createdAt: new Date().toISOString()
+      brand: oem.name,
+      gemSellerId: requesterProfile.gemSellerId,
+      requestedProducts: String(payload.requestedProducts || "").trim(),
+      territory: [requesterProfile.city, requesterProfile.state].filter(Boolean).join(", "),
+      city: requesterProfile.city || "",
+      state: requesterProfile.state || "",
+      ordersCompleted: Number(requesterProfile.ordersCompleted || 0),
+      status: "Under Consideration",
+      timeline: [{ stage: "Request submitted", at: createdAt, by: requesterProfile.businessName || liveUser.businessName || "Reseller" }, { stage: "Under Consideration", at: createdAt, by: oem.name }],
+      createdAt
     };
+    request.reference = `DOME-${request.id.slice(0, 8).toUpperCase()}`;
     db.authorizationRequests.unshift(request);
     addAudit(db, "system", "authorization_requested", `${request.vendorName} -> ${oem.name}`);
     await saveDb();
-    return json(res, 201, { ok: true, request });
+    return json(res, 201, { ok: true, request: authorizationRequestsForUser(db, liveUser).find((item) => item.id === request.id) });
   }
 
   const authorizationStatusMatch = pathname.match(/^\/api\/authorization\/([^/]+)\/status$/);
@@ -1387,16 +1511,25 @@ async function api(req, res, pathname) {
     if (request.oemId !== liveUser.businessId) return json(res, 403, { error: "This request belongs to another OEM." });
     const payload = await readBody(req);
     const status = String(payload.status || "");
-    if (!["Accepted", "Declined"].includes(status)) return json(res, 422, { error: "Choose Accepted or Declined." });
+    if (!["Under Consideration", "Accepted", "Rejected"].includes(status)) return json(res, 422, { error: "Choose Under Consideration, Accepted or Rejected." });
+    const validFrom = String(payload.validFrom || "");
+    const validTo = String(payload.validTo || "");
+    if (validFrom && validTo && validFrom > validTo) return json(res, 422, { error: "Authorization validity end date must be after the start date." });
+    const previousStatus = request.status;
     request.status = status;
+    request.authorizationNumber = String(payload.authorizationNumber || "").trim();
+    request.authorizationAgency = String(payload.authorizationAgency || "").trim();
+    request.authorizationDate = String(payload.authorizationDate || "");
+    request.validFrom = validFrom;
+    request.validTo = validTo;
     request.updatedAt = new Date().toISOString();
     request.timeline ||= [];
-    request.timeline.push({ stage: status, at: request.updatedAt, by: liveUser.businessName || "OEM" });
+    if (previousStatus !== status) request.timeline.push({ stage: status, at: request.updatedAt, by: liveUser.businessName || "OEM" });
     if (status === "Accepted") request.acceptedAt = request.updatedAt;
-    if (status === "Declined") request.declinedAt = request.updatedAt;
-    addAudit(db, liveUser.email, `authorization_${status.toLowerCase()}`, `${request.vendorName} -> ${request.oemName}`);
+    if (status === "Rejected") request.rejectedAt = request.updatedAt;
+    addAudit(db, liveUser.email, `authorization_${status.toLowerCase().replaceAll(" ", "_")}`, `${request.vendorName} -> ${request.oemName}`);
     await saveDb();
-    return json(res, 200, { ok: true, request });
+    return json(res, 200, { ok: true, request: authorizationRequestsForUser(db, liveUser).find((item) => item.id === request.id) });
   }
 
   if (req.method === "POST" && pathname === "/api/setup-request") {
@@ -1513,7 +1646,10 @@ async function api(req, res, pathname) {
     const liveUser = db.users.find((user) => user.id === tokenUser.id);
     if (!liveUser) return json(res, 401, { error: "Session user not found." });
     const payload = await readBody(req);
-    const role = payload.role === "OEM" ? "OEM" : payload.role === "Buyer" ? "Buyer" : "Reseller";
+    if (!["OEM", "Reseller", "Buyer"].includes(payload.role)) return json(res, 422, { error: "Choose OEM, Reseller or Buyer before saving the profile." });
+    const role = payload.role;
+    if (role === "OEM" && !String(payload.gstNumber || "").trim()) return json(res, 422, { error: "GST Number is required for an OEM profile." });
+    if (role === "Reseller" && !String(payload.gemSellerId || "").trim()) return json(res, 422, { error: "GeM Seller ID is required for a Reseller profile." });
     const previousProfile = profileForUser(db, liveUser);
     const previousDomePlusUntil = previousProfile?.domePlusPaidUntil || previousProfile?.micrositePaidUntil || "";
     const products = parseProductsInput(payload.products);
@@ -1533,7 +1669,12 @@ async function api(req, res, pathname) {
       ordersCompleted: Number(payload.ordersCompleted || 0),
       lookingForCategories: Array.isArray(payload.lookingForCategories) ? payload.lookingForCategories : String(payload.lookingForCategories || "").split(",").map((item) => item.trim()).filter(Boolean),
       products,
-      contactList: Array.isArray(payload.contactList) ? payload.contactList : String(payload.contactList || "").split("\n").map((line) => {
+      contactList: Array.isArray(payload.contactList) ? payload.contactList.map((contact) => ({
+        purpose: String(contact?.purpose || "").trim(),
+        name: String(contact?.name || "").trim(),
+        phone: normalizePhone(contact?.phone || ""),
+        email: String(contact?.email || "").toLowerCase().trim()
+      })).filter((item) => item.purpose || item.name || item.phone || item.email) : String(payload.contactList || "").split("\n").map((line) => {
         const [purpose = "", name = "", phone = "", email = ""] = line.split("|").map((item) => item.trim());
         return { purpose, name, phone, email };
       }).filter((item) => item.purpose || item.name || item.phone || item.email),
@@ -1659,6 +1800,9 @@ async function api(req, res, pathname) {
     if (!tokenUser) return json(res, 401, { error: "Sign in required to request OEM authorization." });
     const liveUser = db.users.find((user) => user.id === tokenUser.id);
     if (!liveUser) return json(res, 401, { error: "Session user not found." });
+    if (!["Reseller", "Vendor"].includes(liveUser.role)) return json(res, 403, { error: "Only Reseller profiles can start OEM authorization requests." });
+    const requesterProfile = profileForUser(db, liveUser);
+    if (!requesterProfile?.gemSellerId) return json(res, 422, { error: "Add your GeM Seller ID before starting an OEM authorization request." });
     const payload = await readBody(req);
     const business = db.businesses.find((item) => item.id === payload.businessId && item.type === "OEM");
     if (!business) return json(res, 404, { error: "OEM profile not found." });
